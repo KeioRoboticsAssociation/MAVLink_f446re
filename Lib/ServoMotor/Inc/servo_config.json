@@ -28,5 +28,20 @@
     "failSafeBehavior": "HOLD_POSITION",
     "startupAngleDeg": 90.0,
     "startDisabled": false
+  },
+  "3": {
+    "initial_offset": 90.0,
+    "min_angle": 45.0,
+    "max_angle": 135.0,
+    "pulseMinUs": 1000,
+    "pulseMaxUs": 2000,
+    "pulseNeutralUs": 1500,
+    "directionInverted": false,
+    "maxVelocityDegPerS": 120.0,
+    "maxAccelerationDegPerS2": 240.0,
+    "watchdogTimeoutMs": 1000,
+    "failSafeBehavior": "HOLD_POSITION",
+    "startupAngleDeg": 90.0,
+    "startDisabled": false
   }
 }
