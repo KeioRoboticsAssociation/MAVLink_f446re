@@ -1,0 +1,54 @@
+{
+  "encoder": {
+    "cpr": 1024,
+    "invertA": false,
+    "invertB": false,
+    "useZ": true,
+    "mode": "TIM_ENCODER_MODE",
+    "watchdogTimeoutMs": 500,
+    "offsetCounts": 0,
+    "wrapAround": true
+  },
+  "encoders": {
+    "1": {
+      "cpr": 1024,
+      "invertA": false,
+      "invertB": false,
+      "useZ": true,
+      "mode": "TIM_ENCODER_MODE",
+      "watchdogTimeoutMs": 500,
+      "offsetCounts": 0,
+      "wrapAround": true
+    },
+    "2": {
+      "cpr": 2048,
+      "invertA": false,
+      "invertB": true,
+      "useZ": true,
+      "mode": "TIM_ENCODER_MODE",
+      "watchdogTimeoutMs": 300,
+      "offsetCounts": 0,
+      "wrapAround": true
+    },
+    "3": {
+      "cpr": 4096,
+      "invertA": false,
+      "invertB": false,
+      "useZ": false,
+      "mode": "TIM_ENCODER_MODE",
+      "watchdogTimeoutMs": 200,
+      "offsetCounts": 0,
+      "wrapAround": false
+    },
+    "4": {
+      "cpr": 1024,
+      "invertA": false,
+      "invertB": false,
+      "useZ": false,
+      "mode": "TIM_ENCODER_MODE",
+      "watchdogTimeoutMs": 500,
+      "offsetCounts": 0,
+      "wrapAround": true
+    }
+  }
+}
