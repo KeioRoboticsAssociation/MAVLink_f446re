@@ -79,7 +79,10 @@ public:
 
     float getAngleCmd() const { return state_.targetAngleDeg; }
     float getCurrentAngle() const { return state_.currentAngleDeg; }
-    uint16_t getPulseUs() const { return state_.currentPulseUs; }
+    uint16_t getPulseUs() const { 
+        // Return current pulse, or neutral if not initialized
+        return initialized_ ? state_.currentPulseUs : config_.pulseNeutralUs; 
+    }
     ServoLimits getLimits() const;
     ServoStatus getStatus() const { return state_.status; }
     const ServoState& getState() const { return state_; }

@@ -6,7 +6,8 @@ ServoMotor::ServoMotor() {
     state_.enabled = false;
     state_.currentAngleDeg = 0.0f;
     state_.targetAngleDeg = 0.0f;
-    state_.currentPulseUs = 1500;
+    // Initialize pulse to neutral position from default config
+    state_.currentPulseUs = ServoConfig{}.pulseNeutralUs;
     state_.lastCommandTime = getCurrentTimeMs();
 }
 
@@ -59,13 +60,16 @@ ServoStatus ServoMotor::init(const ServoConfig& config) {
     lastUpdateTime_ = state_.lastCommandTime;
     lastAngleDeg_ = state_.currentAngleDeg;
 
+    // Always calculate the correct startup pulse based on configuration
+    uint16_t startupPulse = static_cast<uint16_t>(angleToPulse(config_.startupAngleDeg));
+    
     if (state_.enabled) {
-        uint16_t startupPulse = static_cast<uint16_t>(angleToPulse(config_.startupAngleDeg));
         updatePWM(startupPulse);
         state_.currentPulseUs = startupPulse;
     } else {
         updatePWM(0);
-        state_.currentPulseUs = 0;
+        // Even when disabled, store the correct pulse for state reporting
+        state_.currentPulseUs = startupPulse;
     }
 
     state_.status = ServoStatus::OK;
