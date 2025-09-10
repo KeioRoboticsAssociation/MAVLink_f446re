@@ -21,14 +21,17 @@ void setup() {
     servo1.create(1, &htim2, TIM_CHANNEL_1);
     servo1.init();
     servo1.setEnabled(true);
+    servo1.setAngleDeg(0);
     
     servo2.create(2, &htim2, TIM_CHANNEL_2);
     servo2.init();
     servo2.setEnabled(true);
+    servo2.setAngleDeg(0);
     
     servo3.create(3, &htim12, TIM_CHANNEL_1);
     servo3.init();
     servo3.setEnabled(true);
+    servo3.setAngleDeg(0);
     
     // Initialize MAVLink controller
     mavlink_controller.init(&huart2, 1);  // UART2, System ID 1

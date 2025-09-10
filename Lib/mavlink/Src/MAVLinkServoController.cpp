@@ -28,8 +28,8 @@ void MAVLinkServoController::update() {
         last_heartbeat_ = now;
     }
     
-    // Send servo telemetry every 100ms (10Hz)
-    if (now - last_telemetry_ >= 100) {
+    // Send servo telemetry every 50ms (20Hz for better control responsiveness)
+    if (now - last_telemetry_ >= 50) {
         sendServoOutputRaw();
         last_telemetry_ = now;
     }
@@ -66,6 +66,10 @@ void MAVLinkServoController::handleMessage(mavlink_message_t* msg) {
             handleRcChannelsOverride(msg);
             break;
             
+        case MAVLINK_MSG_ID_REQUEST_DATA_STREAM:
+            handleRequestDataStream(msg);
+            break;
+            
         default:
             // Unknown message
             break;
@@ -85,16 +89,20 @@ void MAVLinkServoController::sendHeartbeat() {
 void MAVLinkServoController::sendServoOutputRaw() {
     mavlink_message_t msg;
     
-    // Get servo pulse values (up to 16 servos)
+    // Get servo pulse values (up to 16 servos), with validation
     uint16_t servo_values[16] = {0};
     for (uint8_t i = 0; i < servo_count_ && i < 16; i++) {
-        if (servos_[i] != nullptr) {
-            servo_values[i] = servos_[i]->getPulseUs();
+        if (servos_[i] != nullptr && servos_[i]->getStatus() == ServoStatus::OK) {
+            uint16_t pulse = servos_[i]->getPulseUs();
+            // Ensure pulse is within valid MAVLink range (0-65535, typically 1000-2000)
+            servo_values[i] = (pulse >= 500 && pulse <= 2500) ? pulse : 0;
+        } else {
+            servo_values[i] = 0;  // Invalid/disconnected servo
         }
     }
     
     mavlink_msg_servo_output_raw_pack(system_id_, MAV_COMP_ID_AUTOPILOT1, &msg,
-                                     HAL_GetTick() * 1000,  // time_usec
+                                     HAL_GetTick() * 1000ULL,  // time_usec (ensure 64-bit)
                                      0,  // port (MAIN)
                                      servo_values[0], servo_values[1], servo_values[2], servo_values[3],
                                      servo_values[4], servo_values[5], servo_values[6], servo_values[7],
@@ -102,6 +110,14 @@ void MAVLinkServoController::sendServoOutputRaw() {
                                      servo_values[12], servo_values[13], servo_values[14], servo_values[15]);
     
     sendMessage(&msg);
+    
+    // Debug: Toggle LED2 (PA5) to indicate servo data transmission
+    static uint32_t last_led_toggle = 0;
+    uint32_t now = HAL_GetTick();
+    if (now - last_led_toggle > 500) {  // Toggle every 500ms
+        HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_5);
+        last_led_toggle = now;
+    }
 }
 
 void MAVLinkServoController::sendAutopilotVersion() {
@@ -174,7 +190,7 @@ void MAVLinkServoController::handleRcChannelsOverride(mavlink_message_t* msg) {
         return;
     }
     
-    // Direct PWM control for channels 1-8
+    // Convert PWM to angle for channels 1-8 (safer than direct PWM control)
     uint16_t channels[8] = {
         rc_override.chan1_raw, rc_override.chan2_raw, rc_override.chan3_raw, rc_override.chan4_raw,
         rc_override.chan5_raw, rc_override.chan6_raw, rc_override.chan7_raw, rc_override.chan8_raw
@@ -183,9 +199,32 @@ void MAVLinkServoController::handleRcChannelsOverride(mavlink_message_t* msg) {
     for (uint8_t i = 0; i < 8 && i < servo_count_; i++) {
         if (servos_[i] != nullptr && channels[i] != UINT16_MAX && 
             channels[i] >= 1000 && channels[i] <= 2000) {
-            servos_[i]->setPulseUs(channels[i]);
+            // Convert PWM (1000-2000us) to angle (-90 to +90 degrees)
+            float angle = ((float)(channels[i] - 1500) / 500.0f) * 90.0f;
+            servos_[i]->setAngleDeg(angle);
             servos_[i]->resetWatchdog();
         }
+    }
+}
+
+void MAVLinkServoController::handleRequestDataStream(mavlink_message_t* msg) {
+    mavlink_request_data_stream_t request;
+    mavlink_msg_request_data_stream_decode(msg, &request);
+    
+    // Check if message is for us
+    if (request.target_system != system_id_) {
+        return;
+    }
+    
+    // Handle request for servo output stream (MAV_DATA_STREAM_RAW_CONTROLLER = 3)
+    if (request.req_stream_id == MAV_DATA_STREAM_RAW_CONTROLLER || 
+        request.req_stream_id == MAV_DATA_STREAM_ALL) {
+        if (request.start_stop == 1) {
+            // Start streaming - send immediate response
+            sendServoOutputRaw();
+            // Note: Periodic sending is already handled in update() method
+        }
+        // If start_stop == 0, we would stop streaming, but we keep periodic sending for now
     }
 }
 
@@ -194,5 +233,13 @@ void MAVLinkServoController::sendMessage(mavlink_message_t* msg) {
     
     uint8_t buf[MAVLINK_MAX_PACKET_LEN];
     uint16_t len = mavlink_msg_to_send_buffer(buf, msg);
-    HAL_UART_Transmit(uart_, buf, len, HAL_MAX_DELAY);
+    
+    // Use non-blocking transmission with reasonable timeout (100ms)
+    HAL_StatusTypeDef status = HAL_UART_Transmit(uart_, buf, len, 100);
+    
+    // Optional: Toggle LED or set flag for debugging transmission status
+    if (status != HAL_OK) {
+        // Transmission failed - could log error or increment error counter
+        // For now, we'll just continue (non-blocking behavior)
+    }
 }

@@ -2,7 +2,7 @@
 
 #include "stm32f4xx_hal.h"
 #include "Encoder.hpp"
-#include "../mavlink/c_library_v2/common/mavlink.h"
+#include "common/mavlink.h"
 
 class MAVLinkEncoderController {
 public:

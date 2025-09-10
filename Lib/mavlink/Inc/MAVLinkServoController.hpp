@@ -37,5 +37,6 @@ private:
     void sendAutopilotVersion();
     void handleManualControl(mavlink_message_t* msg);
     void handleRcChannelsOverride(mavlink_message_t* msg);
+    void handleRequestDataStream(mavlink_message_t* msg);
     void sendMessage(mavlink_message_t* msg);
 };

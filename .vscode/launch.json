@@ -8,7 +8,7 @@
             "name": "Build & Debug Microcontroller - ST-Link",
             "cwd": "${workspaceFolder}",
             "type": "cortex-debug",
-            "executable": "${command:cmake.launchTargetPath}",
+            "executable": "${workspaceFolder}/build/Debug/mavlink_test.elf",
             // Let CMake extension decide executable: "${command:cmake.launchTargetPath}"
             // Or fixed file path: "${workspaceFolder}/path/to/filename.elf"
             "request": "launch",
@@ -35,7 +35,7 @@
             "name": "Attach to Microcontroller - ST-Link",
             "cwd": "${workspaceFolder}",
             "type": "cortex-debug",
-            "executable": "${command:cmake.launchTargetPath}",
+            "executable": "${workspaceFolder}/build/Debug/mavlink_test.elf",
             // Let CMake extension decide executable: "${command:cmake.launchTargetPath}"
             // Or fixed file path: "${workspaceFolder}/path/to/filename.elf"
             "request": "attach",
