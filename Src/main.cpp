@@ -46,9 +46,7 @@ void setup() {
     mavlink_controller.init(&huart2, 1);  // UART2, System ID 1
     mavlink_controller.addServo(&servo1);
     mavlink_controller.addServo(&servo2);
-    mavlink_controller.addServo(&servo3);
-    HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_5);
-    
+    mavlink_controller.addServo(&servo3);    
     // Enable UART receive interrupt
     HAL_UART_Receive_IT(&huart2, rx_buffer, 1);
 }

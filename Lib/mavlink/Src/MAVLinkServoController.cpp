@@ -28,11 +28,8 @@ void MAVLinkServoController::update() {
         last_heartbeat_ = now;
     }
     
-    // Send servo telemetry every 50ms (20Hz for better control responsiveness)
-    if (now - last_telemetry_ >= 50) {
-        sendServoOutputRaw();
-        last_telemetry_ = now;
-    }
+    // Passive mode: Only send servo status when explicitly requested
+    // (Remove automatic 20Hz transmission for ROS compatibility)
     
     // Update all servos (handles rate limiting and safety)
     for (uint8_t i = 0; i < servo_count_; i++) {
@@ -68,6 +65,16 @@ void MAVLinkServoController::handleMessage(mavlink_message_t* msg) {
             
         case MAVLINK_MSG_ID_REQUEST_DATA_STREAM:
             handleRequestDataStream(msg);
+            break;
+            
+        case MAVLINK_MSG_ID_PARAM_REQUEST_READ:
+            // Send servo status when parameter read is requested
+            sendServoOutputRaw();
+            break;
+            
+        case MAVLINK_MSG_ID_PARAM_REQUEST_LIST:
+            // Send servo status when parameter list is requested
+            sendServoOutputRaw();
             break;
             
         default:
@@ -110,14 +117,6 @@ void MAVLinkServoController::sendServoOutputRaw() {
                                      servo_values[12], servo_values[13], servo_values[14], servo_values[15]);
     
     sendMessage(&msg);
-    
-    // Debug: Toggle LED2 (PA5) to indicate servo data transmission
-    static uint32_t last_led_toggle = 0;
-    uint32_t now = HAL_GetTick();
-    if (now - last_led_toggle > 500) {  // Toggle every 500ms
-        HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_5);
-        last_led_toggle = now;
-    }
 }
 
 void MAVLinkServoController::sendAutopilotVersion() {
@@ -220,11 +219,10 @@ void MAVLinkServoController::handleRequestDataStream(mavlink_message_t* msg) {
     if (request.req_stream_id == MAV_DATA_STREAM_RAW_CONTROLLER || 
         request.req_stream_id == MAV_DATA_STREAM_ALL) {
         if (request.start_stop == 1) {
-            // Start streaming - send immediate response
+            // Send immediate servo status response (passive mode - only on request)
             sendServoOutputRaw();
-            // Note: Periodic sending is already handled in update() method
         }
-        // If start_stop == 0, we would stop streaming, but we keep periodic sending for now
+        // Passive mode: We don't start continuous streaming, only respond to requests
     }
 }
 
