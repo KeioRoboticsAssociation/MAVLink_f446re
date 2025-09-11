@@ -3,7 +3,11 @@
 #include "MAVLinkServoController.hpp"
 
 // HAL objects
+//uart
 extern UART_HandleTypeDef huart2;
+//can
+extern CAN_HandleTypeDef hcan1;
+//timers
 extern TIM_HandleTypeDef htim2;
 extern TIM_HandleTypeDef htim12;
 
