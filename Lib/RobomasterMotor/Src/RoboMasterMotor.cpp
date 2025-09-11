@@ -223,9 +223,20 @@ void RoboMasterMotor::update() {
 
 void RoboMasterMotor::updateControlLoop() {
     uint32_t currentTime = getCurrentTimeMs();
-    float deltaTimeS = static_cast<float>(currentTime - last_update_time_) / 1000.0f;
     
-    if (deltaTimeS <= 0.0f) {
+    // Handle potential overflow of HAL_GetTick() (wraps every ~49.7 days)
+    int64_t deltaTimeMs = static_cast<int64_t>(currentTime) - static_cast<int64_t>(last_update_time_);
+    
+    // Handle overflow case (assumes updates happen more frequently than 24 days)
+    if (deltaTimeMs < 0) {
+        deltaTimeMs += UINT32_MAX;
+    }
+    
+    float deltaTimeS = static_cast<float>(deltaTimeMs) / 1000.0f;
+    
+    // Sanity check: ignore extremely large deltas (likely due to initialization or overflow)
+    if (deltaTimeS <= 0.0f || deltaTimeS > 1.0f) {
+        last_update_time_ = currentTime;
         return;
     }
     
@@ -431,17 +442,17 @@ void RoboMasterMotor::handleTimeout() {
 
 void RoboMasterMotor::applyFailSafe() {
     switch (config_.failSafeBehavior) {
-        case FailSafeBehavior::HOLD_POSITION:
+        case RoboMasterFailSafeBehavior::HOLD_POSITION:
             // Keep current position as target
             state_.targetPositionRad = state_.currentPositionRad;
             break;
             
-        case FailSafeBehavior::BRAKE:
+        case RoboMasterFailSafeBehavior::BRAKE:
             // Set velocity target to zero
             state_.targetVelocityRPS = 0.0f;
             break;
             
-        case FailSafeBehavior::DISABLE_OUTPUT:
+        case RoboMasterFailSafeBehavior::DISABLE_OUTPUT:
             state_.enabled = false;
             sendCurrentCommand(0);
             break;

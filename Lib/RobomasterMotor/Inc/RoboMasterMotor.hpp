@@ -21,7 +21,7 @@ enum class RoboMasterControlMode {
     POSITION = 2
 };
 
-enum class FailSafeBehavior {
+enum class RoboMasterFailSafeBehavior {
     HOLD_POSITION = 0,
     BRAKE = 1,
     DISABLE_OUTPUT = 2
@@ -42,7 +42,7 @@ struct RoboMasterConfig {
     // Safety settings
     uint32_t watchdogTimeoutMs = 1000;       // Watchdog timeout
     uint8_t maxTemperature = 80;             // Max temperature in Celsius
-    FailSafeBehavior failSafeBehavior = FailSafeBehavior::BRAKE;
+    RoboMasterFailSafeBehavior failSafeBehavior = RoboMasterFailSafeBehavior::BRAKE;
     
     // Control parameters
     float positionKp = 10.0f;                // Position P gain

@@ -84,10 +84,26 @@ void setup() {
 void loop() {
     // Process any received UART data from interrupt buffer
     while (uart_rx_tail != uart_rx_head) {
-        uint8_t byte = uart_rx_buffer[uart_rx_tail];
-        uart_rx_tail = (uart_rx_tail + 1) % UART_BUFFER_SIZE;
-        mavlink_controller.processReceivedByte(byte);
-        mavlink_robomaster_controller.processReceivedByte(byte);
+        // Disable interrupts temporarily to ensure atomic access
+        __disable_irq();
+        uint16_t local_head = uart_rx_head;
+        uint16_t local_tail = uart_rx_tail;
+        __enable_irq();
+        
+        if (local_tail != local_head) {
+            uint8_t byte = uart_rx_buffer[local_tail];
+            local_tail = (local_tail + 1) % UART_BUFFER_SIZE;
+            
+            // Update tail atomically
+            __disable_irq();
+            uart_rx_tail = local_tail;
+            __enable_irq();
+            
+            mavlink_controller.processReceivedByte(byte);
+            mavlink_robomaster_controller.processReceivedByte(byte);
+        } else {
+            break; // Buffer is empty
+        }
     }
     
     // Update MAVLink controllers
@@ -116,5 +132,11 @@ extern "C" void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
         
         // Toggle LED to indicate activity
         HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_5);
+    }
+}
+
+extern "C" void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan) {
+    if (hcan->Instance == CAN1) {
+        can_manager.handleCANReceive();
     }
 }

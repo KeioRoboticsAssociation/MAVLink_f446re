@@ -494,3 +494,127 @@ void MAVLinkRoboMasterController::loadParametersFromFlash() {
     // TODO: Implement flash loading  
     sendStatusText(MAV_SEVERITY_INFO, "Parameters loaded");
 }
+
+// Missing method implementations
+
+void MAVLinkRoboMasterController::handleHeartbeat(mavlink_message_t* msg) {
+    mavlink_heartbeat_t heartbeat;
+    mavlink_msg_heartbeat_decode(msg, &heartbeat);
+    
+    // Process heartbeat from ground station
+    // Could track connection status, etc.
+    (void)heartbeat; // Suppress unused parameter warning
+}
+
+void MAVLinkRoboMasterController::handleRCChannelsOverride(mavlink_message_t* msg) {
+    mavlink_rc_channels_override_t rc_override;
+    mavlink_msg_rc_channels_override_decode(msg, &rc_override);
+    
+    if (rc_override.target_system != system_id_) {
+        return;
+    }
+    
+    // Map RC channels to motors (scaled to ±50 RPS)
+    float scale = 50.0f / 1000.0f;
+    
+    if (motor_registered_[0] && motors_[0] != nullptr && rc_override.chan1_raw != UINT16_MAX) {
+        float velocity = (static_cast<float>(rc_override.chan1_raw) - 1500.0f) * scale;
+        motors_[0]->setVelocityRPS(velocity);
+    }
+    
+    if (motor_registered_[1] && motors_[1] != nullptr && rc_override.chan2_raw != UINT16_MAX) {
+        float velocity = (static_cast<float>(rc_override.chan2_raw) - 1500.0f) * scale;
+        motors_[1]->setVelocityRPS(velocity);
+    }
+    
+    if (motor_registered_[2] && motors_[2] != nullptr && rc_override.chan3_raw != UINT16_MAX) {
+        float velocity = (static_cast<float>(rc_override.chan3_raw) - 1500.0f) * scale;
+        motors_[2]->setVelocityRPS(velocity);
+    }
+    
+    if (motor_registered_[3] && motors_[3] != nullptr && rc_override.chan4_raw != UINT16_MAX) {
+        float velocity = (static_cast<float>(rc_override.chan4_raw) - 1500.0f) * scale;
+        motors_[3]->setVelocityRPS(velocity);
+    }
+}
+
+void MAVLinkRoboMasterController::handleRequestDataStream(mavlink_message_t* msg) {
+    mavlink_request_data_stream_t request;
+    mavlink_msg_request_data_stream_decode(msg, &request);
+    
+    if (request.target_system != system_id_) {
+        return;
+    }
+    
+    // Update telemetry rate based on request
+    if (request.req_stream_id == MAV_DATA_STREAM_ALL || 
+        request.req_stream_id == MAV_DATA_STREAM_RC_CHANNELS) {
+        
+        telemetry_enabled_ = (request.start_stop == 1);
+        if (request.req_message_rate > 0) {
+            telemetry_rate_ms_ = 1000 / request.req_message_rate;
+        }
+    }
+}
+
+void MAVLinkRoboMasterController::handleMotorControl(mavlink_message_t* msg) {
+    // Handle custom RoboMaster motor control message
+    // This would need custom MAVLink message definitions
+    
+    // For now, extract basic data assuming a simple format
+    const uint8_t* payload = reinterpret_cast<const uint8_t*>(msg->payload64);
+    
+    if (msg->len >= 8) {
+        uint8_t motor_id = payload[0];
+        uint8_t control_mode = payload[1]; // 0=current, 1=velocity, 2=position
+        
+        // Extract control value (little endian)
+        float control_value;
+        memcpy(&control_value, &payload[2], sizeof(float));
+        
+        RoboMasterMotor* motor = findMotor(motor_id);
+        if (motor != nullptr) {
+            switch (control_mode) {
+                case 0: // Current control
+                    motor->setCurrent(static_cast<int16_t>(control_value));
+                    break;
+                case 1: // Velocity control
+                    motor->setVelocityRPS(control_value);
+                    break;
+                case 2: // Position control
+                    motor->setPositionRad(control_value);
+                    break;
+            }
+        }
+    }
+}
+
+void MAVLinkRoboMasterController::handleMotorConfigSet(mavlink_message_t* msg) {
+    // Handle custom RoboMaster motor configuration message
+    // This would need custom MAVLink message definitions
+    
+    const uint8_t* payload = reinterpret_cast<const uint8_t*>(msg->payload64);
+    
+    if (msg->len >= 12) {
+        uint8_t motor_id = payload[0];
+        uint8_t param_id = payload[1];
+        
+        // Extract parameter value (little endian)
+        float param_value;
+        memcpy(&param_value, &payload[2], sizeof(float));
+        
+        RoboMasterMotor* motor = findMotor(motor_id);
+        if (motor != nullptr) {
+            // Map param_id to actual parameters
+            const char* param_names[] = {
+                "positionKp", "positionKi", "positionKd",
+                "velocityKp", "velocityKi", "velocityKd",
+                "maxVelocityRPS", "maxCurrent", "maxTemperature"
+            };
+            
+            if (param_id < sizeof(param_names) / sizeof(param_names[0])) {
+                motor->updateParameter(param_names[param_id], param_value);
+            }
+        }
+    }
+}

@@ -194,9 +194,10 @@ void RoboMasterCANManager::handleCANReceive(uint32_t rx_id, const uint8_t* data,
     // Determine motor ID from CAN ID
     uint8_t motor_id = getMotorIdFromCANId(rx_id);
     
-    if (motor_id > 0 && motor_id <= MAX_MOTORS) {
+    if (isValidMotorId(motor_id)) {
         processMotorFeedback(motor_id, data, length);
     }
+    // Silently ignore invalid motor IDs to avoid spam
 }
 
 void RoboMasterCANManager::update() {
@@ -286,7 +287,7 @@ uint8_t RoboMasterCANManager::getMotorIdFromCANId(uint32_t can_id) const {
         return static_cast<uint8_t>(can_id - RoboMasterCANIDs::MOTOR_FEEDBACK_BASE + 1);
     }
     
-    return 0;  // Invalid motor ID
+    return 255;  // Invalid motor ID (out of valid range 1-8)
 }
 
 bool RoboMasterCANManager::isValidMotorId(uint8_t motor_id) const {

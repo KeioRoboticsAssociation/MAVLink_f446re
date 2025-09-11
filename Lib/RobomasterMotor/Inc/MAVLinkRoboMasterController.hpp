@@ -3,7 +3,7 @@
 #include "stm32f4xx_hal.h"
 #include "RoboMasterMotor.hpp"
 #include "RoboMasterCANManager.hpp"
-#include "../mavlink/c_library_v2/common/mavlink.h"
+#include "../../mavlink/c_library_v2/common/mavlink.h"
 
 /**
  * @brief MAVLink interface for RoboMaster motor control and parameter management
