@@ -1,6 +1,9 @@
 #include "main.hpp"
 #include "ServoMotor.hpp"
 #include "MAVLinkServoController.hpp"
+#include "RoboMasterMotor.hpp"
+#include "RoboMasterCANManager.hpp"
+#include "MAVLinkRoboMasterController.hpp"
 
 // HAL objects
 //uart
@@ -13,6 +16,7 @@ extern TIM_HandleTypeDef htim12;
 
 // MAVLink communication
 MAVLinkServoController mavlink_controller;
+MAVLinkRoboMasterController mavlink_robomaster_controller;
 uint8_t rx_buffer[1];
 
 // Interrupt-safe circular buffer for UART data
@@ -26,10 +30,13 @@ ServoMotor servo1;
 ServoMotor servo2;
 ServoMotor servo3;
 
-int setup_count = 0;
+// RoboMaster CAN manager and GM6020 motor instances
+RoboMasterCANManager can_manager;
+RoboMasterMotor gm6020_1;
+// RoboMasterMotor gm6020_2;
+
 
 void setup() {
-    setup_count++;
     // Initialize servos
     servo1.create(1, &htim2, TIM_CHANNEL_1);
     servo1.init();
@@ -46,11 +53,30 @@ void setup() {
     servo3.setEnabled(true);
     servo3.setAngleDeg(0);
     
-    // Initialize MAVLink controller
+    // Initialize CAN manager and GM6020 motors
+    can_manager.init(&hcan1);
+    can_manager.start();
+    
+    gm6020_1.create(5, &can_manager);
+    gm6020_1.init();
+    gm6020_1.setEnabled(true);
+    
+    // gm6020_2.create(6, &can_manager);
+    // gm6020_2.init();
+    // gm6020_2.setEnabled(true);
+    
+    // Initialize MAVLink controllers
     mavlink_controller.init(&huart2, 1);  // UART2, System ID 1
     mavlink_controller.addServo(&servo1);
     mavlink_controller.addServo(&servo2);
-    mavlink_controller.addServo(&servo3);    
+    mavlink_controller.addServo(&servo3);
+    
+    // Initialize MAVLink RoboMaster controller
+    mavlink_robomaster_controller.init(&huart2, 1);  // UART2, System ID 1
+    mavlink_robomaster_controller.setCANManager(&can_manager);
+    mavlink_robomaster_controller.addMotor(&gm6020_1, 5);
+    // mavlink_robomaster_controller.addMotor(&gm6020_2, 6);
+    
     // Enable UART receive interrupt
     HAL_UART_Receive_IT(&huart2, rx_buffer, 1);
 }
@@ -61,10 +87,15 @@ void loop() {
         uint8_t byte = uart_rx_buffer[uart_rx_tail];
         uart_rx_tail = (uart_rx_tail + 1) % UART_BUFFER_SIZE;
         mavlink_controller.processReceivedByte(byte);
+        mavlink_robomaster_controller.processReceivedByte(byte);
     }
     
-    // Update MAVLink controller (handles heartbeat, telemetry, and servo updates)
+    // Update MAVLink controllers
     mavlink_controller.update();
+    mavlink_robomaster_controller.update();
+    
+    // Update CAN manager
+    can_manager.update();
     
     // Short delay to prevent tight loop
     HAL_Delay(10);
