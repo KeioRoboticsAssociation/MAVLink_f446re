@@ -8,7 +8,9 @@ RoboMasterMotor::RoboMasterMotor() {
     state_.enabled = false;
     state_.currentPositionRad = 0.0f;
     state_.targetPositionRad = 0.0f;
-    state_.lastCommandTime = getCurrentTimeMs();
+    uint32_t currentTime = getCurrentTimeMs();
+    state_.lastCommandTime = currentTime;
+    state_.lastFeedbackTime = currentTime;  // Initialize feedback time
 }
 
 RoboMasterStatus RoboMasterMotor::create(uint8_t motor_id, RoboMasterCANManager* can_manager) {
@@ -55,8 +57,10 @@ RoboMasterStatus RoboMasterMotor::init(const RoboMasterConfig& config) {
     state_.enabled = !config_.startDisabled;
     state_.controlMode = config_.startupMode;
     state_.targetPositionRad = config_.startupPositionRad;
-    state_.lastCommandTime = getCurrentTimeMs();
-    last_update_time_ = state_.lastCommandTime;
+    uint32_t currentTime = getCurrentTimeMs();
+    state_.lastCommandTime = currentTime;
+    state_.lastFeedbackTime = currentTime;  // Initialize feedback time during init
+    last_update_time_ = currentTime;
     
     // Reset control state
     position_integral_ = 0.0f;
@@ -64,6 +68,8 @@ RoboMasterStatus RoboMasterMotor::init(const RoboMasterConfig& config) {
     last_position_error_ = 0.0f;
     velocity_integral_ = 0.0f;
     last_velocity_error_ = 0.0f;
+    current_integral_ = 0.0f;
+    last_current_error_ = 0.0f;
     last_target_velocity_ = 0.0f;
     
     state_.status = RoboMasterStatus::OK;
@@ -149,8 +155,10 @@ RoboMasterStatus RoboMasterMotor::setControlMode(RoboMasterControlMode mode) {
     // Reset integrators when changing modes
     position_integral_ = 0.0f;
     velocity_integral_ = 0.0f;
+    current_integral_ = 0.0f;
     last_position_error_ = 0.0f;
     last_velocity_error_ = 0.0f;
+    last_current_error_ = 0.0f;
     
     return RoboMasterStatus::OK;
 }
@@ -168,6 +176,7 @@ RoboMasterStatus RoboMasterMotor::setEnabled(bool enabled) {
         // Reset control state
         position_integral_ = 0.0f;
         velocity_integral_ = 0.0f;
+        current_integral_ = 0.0f;
     }
     
     return RoboMasterStatus::OK;
@@ -199,124 +208,162 @@ void RoboMasterMotor::update() {
     if (!initialized_) {
         return;
     }
-    
+
     uint32_t currentTime = getCurrentTimeMs();
-    
-    // Check for timeout
-    if (currentTime - state_.lastCommandTime > config_.watchdogTimeoutMs) {
-        handleTimeout();
-        return;
+
+    // Simplified timeout check that's less likely to be optimized incorrectly
+    checkTimeoutStatus();
+
+    // If timeout occurred, status will be TIMEOUT and we should not continue
+    if (state_.status == RoboMasterStatus::TIMEOUT) {
+        HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_SET);  // LED ON for timeout
+        return;  // Exit early if in timeout state
     }
-    
+
+    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_RESET);  // LED OFF for normal operation
+
     // Check safety limits
     checkSafetyLimits();
-    
+
     if (!state_.enabled) {
         return;
     }
-    
+
     // Update control loop
     updateControlLoop();
-    
+
     last_update_time_ = currentTime;
 }
 
+// updateControlLoop関数の修正版（位置制御部分）
 void RoboMasterMotor::updateControlLoop() {
     uint32_t currentTime = getCurrentTimeMs();
-    
-    // Handle potential overflow of HAL_GetTick() (wraps every ~49.7 days)
+
+    // Handle potential overflow of HAL_GetTick()
     int64_t deltaTimeMs = static_cast<int64_t>(currentTime) - static_cast<int64_t>(last_update_time_);
     
-    // Handle overflow case (assumes updates happen more frequently than 24 days)
     if (deltaTimeMs < 0) {
         deltaTimeMs += UINT32_MAX;
     }
-    
+
     float deltaTimeS = static_cast<float>(deltaTimeMs) / 1000.0f;
-    
-    // Sanity check: ignore extremely large deltas (likely due to initialization or overflow)
+
+    // Sanity check
     if (deltaTimeS <= 0.0f || deltaTimeS > 1.0f) {
         last_update_time_ = currentTime;
         return;
     }
-    
+
+    float targetVelocity = 0.0f;
+    int16_t targetCurrent = 0;
     int16_t outputCurrent = 0;
-    
-    switch (state_.controlMode) {
-        case RoboMasterControlMode::POSITION: {
-            // Position control with PID
-            float positionError = state_.targetPositionRad - state_.currentPositionRad;
-            
-            // Proportional term
-            float pTerm = config_.positionKp * positionError;
-            
-            // Integral term
+
+    // [OUTER LOOP] Position PID → Target Velocity
+    if (state_.controlMode == RoboMasterControlMode::POSITION) {
+        float positionError = state_.targetPositionRad - state_.currentPositionRad;
+
+        // デッドバンドの追加（オプション）
+        const float POSITION_DEADBAND = 0.01f;  // 約0.57度
+        if (std::abs(positionError) < POSITION_DEADBAND) {
+            positionError = 0.0f;
+            position_integral_ = 0.0f;  // 積分項もリセット
+        }
+
+        // Proportional term
+        float pTerm = config_.positionKp * positionError;
+
+        // Integral term with anti-windup（改善版）
+        const float INTEGRAL_LIMIT_FACTOR = 0.3f;  // 積分項の制限を緩和
+        float maxIntegral = (config_.maxVelocityRPS * INTEGRAL_LIMIT_FACTOR) / (config_.positionKi + 1e-6f);
+        
+        // 積分項の更新（エラーが小さい時のみ）
+        if (std::abs(positionError) < 0.5f) {  // 約28度以内
             position_integral_ += positionError * deltaTimeS;
-            // Anti-windup
-            float maxIntegral = static_cast<float>(config_.maxCurrent) / (config_.positionKi + 1e-6f);
             position_integral_ = std::max(-maxIntegral, std::min(maxIntegral, position_integral_));
-            float iTerm = config_.positionKi * position_integral_;
-            
-            // Derivative term
-            float dTerm = config_.positionKd * (positionError - last_position_error_) / deltaTimeS;
-            last_position_error_ = positionError;
-            
-            // Convert to velocity command (position PID output becomes velocity setpoint)
-            float targetVelocity = pTerm + iTerm + dTerm;
-            targetVelocity = constrainVelocity(targetVelocity);
-            
-            // Apply acceleration limiting
+        } else {
+            // 大きなエラーの場合は積分項をリセット
+            position_integral_ *= 0.95f;  // 徐々に減衰
+        }
+        float iTerm = config_.positionKi * position_integral_;
+
+        // Derivative term with filtering
+        float rawDerivative = (positionError - last_position_error_) / deltaTimeS;
+        
+        // ローパスフィルタを適用（ノイズ低減）
+        static float filtered_derivative = 0.0f;
+        const float DERIVATIVE_FILTER_ALPHA = 0.2f;
+        filtered_derivative = DERIVATIVE_FILTER_ALPHA * rawDerivative + 
+                            (1.0f - DERIVATIVE_FILTER_ALPHA) * filtered_derivative;
+        
+        float dTerm = config_.positionKd * filtered_derivative;
+        last_position_error_ = positionError;
+
+        // Position PID output
+        targetVelocity = pTerm + iTerm + dTerm;
+        
+        // 速度制限（位置制御モードでは少し控えめに）
+        const float POSITION_MODE_VELOCITY_FACTOR = 0.8f;
+        float maxVel = config_.maxVelocityRPS * POSITION_MODE_VELOCITY_FACTOR;
+        targetVelocity = std::max(-maxVel, std::min(maxVel, targetVelocity));
+
+        // Apply acceleration limiting
+        applyRateLimiting(targetVelocity, deltaTimeS);
+    } else {
+        // Use directly commanded velocity for VELOCITY and CURRENT modes
+        targetVelocity = state_.targetVelocityRPS;
+        if (state_.controlMode == RoboMasterControlMode::VELOCITY) {
             applyRateLimiting(targetVelocity, deltaTimeS);
-            
-            // Velocity control as inner loop
-            float velocityError = targetVelocity - state_.currentVelocityRPS;
-            velocity_integral_ += velocityError * deltaTimeS;
-            
-            // Anti-windup for velocity integral
-            maxIntegral = static_cast<float>(config_.maxCurrent) / (config_.velocityKi + 1e-6f);
-            velocity_integral_ = std::max(-maxIntegral, std::min(maxIntegral, velocity_integral_));
-            
-            float velocityOutput = config_.velocityKp * velocityError + config_.velocityKi * velocity_integral_;
-            outputCurrent = static_cast<int16_t>(constrainCurrent(static_cast<int16_t>(velocityOutput)));
-            
-            break;
         }
-        
-        case RoboMasterControlMode::VELOCITY: {
-            // Velocity control with PI
-            float targetVel = state_.targetVelocityRPS;
-            applyRateLimiting(targetVel, deltaTimeS);
-            
-            float velocityError = targetVel - state_.currentVelocityRPS;
-            
-            // Proportional term
-            float pTerm = config_.velocityKp * velocityError;
-            
-            // Integral term with anti-windup
-            velocity_integral_ += velocityError * deltaTimeS;
-            float maxIntegral = static_cast<float>(config_.maxCurrent) / (config_.velocityKi + 1e-6f);
-            velocity_integral_ = std::max(-maxIntegral, std::min(maxIntegral, velocity_integral_));
-            float iTerm = config_.velocityKi * velocity_integral_;
-            
-            outputCurrent = static_cast<int16_t>(constrainCurrent(static_cast<int16_t>(pTerm + iTerm)));
-            
-            break;
-        }
-        
-        case RoboMasterControlMode::CURRENT:
-        default:
-            // Direct current control
-            outputCurrent = constrainCurrent(state_.targetCurrent);
-            break;
     }
+
+    // [INNER LOOP] Velocity PID → Target Current
+    if (state_.controlMode == RoboMasterControlMode::POSITION ||
+        state_.controlMode == RoboMasterControlMode::VELOCITY) {
+
+        float velocityError = targetVelocity - state_.currentVelocityRPS;
+
+        // Proportional term
+        float pTerm = config_.velocityKp * velocityError;
+
+        // Integral term with improved anti-windup
+        const float VEL_INTEGRAL_LIMIT_FACTOR = 0.5f;
+        float maxIntegral = static_cast<float>(config_.maxCurrent) * VEL_INTEGRAL_LIMIT_FACTOR / 
+                           (config_.velocityKi + 1e-6f);
+        
+        velocity_integral_ += velocityError * deltaTimeS;
+        velocity_integral_ = std::max(-maxIntegral, std::min(maxIntegral, velocity_integral_));
+        float iTerm = config_.velocityKi * velocity_integral_;
+
+        // Derivative term
+        float dTerm = config_.velocityKd * (velocityError - last_velocity_error_) / deltaTimeS;
+        last_velocity_error_ = velocityError;
+
+        // Velocity PID output
+        targetCurrent = static_cast<int16_t>(pTerm + iTerm + dTerm);
+    } else {
+        // Use directly commanded current for CURRENT mode
+        targetCurrent = state_.targetCurrent;
+    }
+
+    // [INNERMOST LOOP] Current limiting and direction
+    outputCurrent = constrainCurrent(targetCurrent);
     
-    // Send current command
+    // 方向反転の適用
+    if (config_.directionInverted) {
+        outputCurrent = -outputCurrent;
+    }
+
+    // Send final motor command
     sendCurrentCommand(outputCurrent);
-    state_.targetCurrent = outputCurrent;
+    state_.targetCurrent = targetCurrent;
 }
 
 void RoboMasterMotor::resetWatchdog() {
+    // Reset command timeout (for when user sends commands)
     state_.lastCommandTime = getCurrentTimeMs();
+    
+    // Note: lastFeedbackTime is only reset when actual CAN feedback is received
+    // in processCANData(). This ensures timeout detection works correctly.
     
     if (state_.status == RoboMasterStatus::TIMEOUT) {
         state_.status = RoboMasterStatus::OK;
@@ -328,46 +375,56 @@ void RoboMasterMotor::processCANData(const uint8_t* data, uint8_t length) {
         return;
     }
     
-    // Parse RoboMaster feedback data format
-    // Bytes 0-1: Rotor angle (0-8191)
-    // Bytes 2-3: Rotor speed (RPM)
-    // Bytes 4-5: Torque current (mA)
-    // Byte 6: Motor temperature (°C)
-    // Byte 7: Reserved
+    // Update feedback reception timestamp - this is critical for timeout detection
+    state_.lastFeedbackTime = getCurrentTimeMs();
     
+    // Parse RoboMaster feedback data format
     int16_t raw_angle = (static_cast<int16_t>(data[0]) << 8) | data[1];
     int16_t raw_speed = (static_cast<int16_t>(data[2]) << 8) | data[3];
     int16_t raw_current = (static_cast<int16_t>(data[4]) << 8) | data[5];
     uint8_t temperature = data[6];
     
-    // Convert raw angle to radians
+    // Convert raw angle to radians (0-8191 -> 0-2π)
     float current_raw_position = static_cast<float>(raw_angle) * RAD_PER_COUNT;
     
-    // Handle position wrapping and multi-turn tracking
+    // Initialize zero position on first call
     if (!zero_set_) {
-        zero_position_rad_ = current_raw_position - config_.startupPositionRad - config_.positionOffsetRad;
+        zero_position_rad_ = current_raw_position;
         zero_set_ = true;
+        last_raw_position_ = current_raw_position;
+        absolute_position_rad_ = 0.0f;  // Start at zero
+        position_wraps_ = 0;
+    } else {
+        // Improved wrap detection with hysteresis
+        float position_delta = current_raw_position - last_raw_position_;
+        
+        // Check for wrap-around (threshold at ±π with some margin)
+        const float WRAP_THRESHOLD = M_PI * 1.5f;  // 270 degrees
+        
+        if (position_delta > WRAP_THRESHOLD) {
+            // Wrapped from ~2π to ~0 (counter-clockwise)
+            position_wraps_--;
+        } else if (position_delta < -WRAP_THRESHOLD) {
+            // Wrapped from ~0 to ~2π (clockwise)
+            position_wraps_++;
+        }
+        
         last_raw_position_ = current_raw_position;
     }
     
-    // Detect wrapping
-    float position_delta = current_raw_position - last_raw_position_;
-    if (position_delta > M_PI) {
-        position_wraps_--;
-    } else if (position_delta < -M_PI) {
-        position_wraps_++;
-    }
-    last_raw_position_ = current_raw_position;
+    // Calculate absolute position with proper wrapping
+    float unwrapped_position = current_raw_position - zero_position_rad_;
+    unwrapped_position += (static_cast<float>(position_wraps_) * 2.0f * M_PI);
     
-    // Calculate absolute position
-    absolute_position_rad_ = current_raw_position + (static_cast<float>(position_wraps_) * 2.0f * M_PI);
+    // Apply offset AFTER unwrapping
+    unwrapped_position += config_.positionOffsetRad;
     
-    // Apply direction inversion and offset
-    float position = absolute_position_rad_ - zero_position_rad_;
+    // Apply direction inversion
     if (config_.directionInverted) {
-        position = -position;
+        unwrapped_position = -unwrapped_position;
     }
-    state_.currentPositionRad = position;
+    
+    state_.currentPositionRad = unwrapped_position;
     
     // Convert velocity (RPM to RPS)
     float velocity = static_cast<float>(raw_speed) / 60.0f;
@@ -377,9 +434,10 @@ void RoboMasterMotor::processCANData(const uint8_t* data, uint8_t length) {
     state_.currentVelocityRPS = velocity;
     
     // Current and temperature
-    state_.currentMilliamps = raw_current;
+    state_.currentMilliamps = config_.directionInverted ? -raw_current : raw_current;
     state_.temperatureCelsius = temperature;
 }
+
 
 RoboMasterStatus RoboMasterMotor::validateConfig(const RoboMasterConfig& config) const {
     if (config.maxVelocityRPS <= 0 || config.maxAccelerationRPS2 <= 0) {
@@ -437,6 +495,12 @@ void RoboMasterMotor::handleTimeout() {
         state_.status = RoboMasterStatus::TIMEOUT;
         state_.timeoutCount++;
         applyFailSafe();
+        
+        // Debug: Flash LED rapidly when timeout occurs
+        for (int i = 0; i < 10; i++) {
+            HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_5);
+            HAL_Delay(50);
+        }
     }
 }
 
@@ -456,6 +520,17 @@ void RoboMasterMotor::applyFailSafe() {
             state_.enabled = false;
             sendCurrentCommand(0);
             break;
+    }
+}
+
+void RoboMasterMotor::checkTimeoutStatus() {
+    uint32_t currentTime = getCurrentTimeMs();
+    
+    // Check for timeout based on feedback reception time
+    if (currentTime - state_.lastFeedbackTime > config_.watchdogTimeoutMs) {
+        if (state_.status != RoboMasterStatus::TIMEOUT) {
+            handleTimeout();
+        }
     }
 }
 
@@ -506,6 +581,12 @@ RoboMasterStatus RoboMasterMotor::updateParameter(const char* param_name, float 
         config_.velocityKi = value;
     } else if (strcmp(param_name, "velocityKd") == 0) {
         config_.velocityKd = value;
+    } else if (strcmp(param_name, "currentKp") == 0) {
+        config_.currentKp = value;
+    } else if (strcmp(param_name, "currentKi") == 0) {
+        config_.currentKi = value;
+    } else if (strcmp(param_name, "currentKd") == 0) {
+        config_.currentKd = value;
     } else if (strcmp(param_name, "maxVelocityRPS") == 0) {
         config_.maxVelocityRPS = value;
     } else if (strcmp(param_name, "maxAccelerationRPS2") == 0) {
@@ -536,6 +617,7 @@ RoboMasterStatus RoboMasterMotor::updateParameter(const char* param_name, float 
     if (strstr(param_name, "Kp") || strstr(param_name, "Ki") || strstr(param_name, "Kd")) {
         position_integral_ = 0.0f;
         velocity_integral_ = 0.0f;
+        current_integral_ = 0.0f;
     }
     
     return RoboMasterStatus::OK;
@@ -558,6 +640,12 @@ float RoboMasterMotor::getParameter(const char* param_name) const {
         return config_.velocityKi;
     } else if (strcmp(param_name, "velocityKd") == 0) {
         return config_.velocityKd;
+    } else if (strcmp(param_name, "currentKp") == 0) {
+        return config_.currentKp;
+    } else if (strcmp(param_name, "currentKi") == 0) {
+        return config_.currentKi;
+    } else if (strcmp(param_name, "currentKd") == 0) {
+        return config_.currentKd;
     } else if (strcmp(param_name, "maxVelocityRPS") == 0) {
         return config_.maxVelocityRPS;
     } else if (strcmp(param_name, "maxAccelerationRPS2") == 0) {

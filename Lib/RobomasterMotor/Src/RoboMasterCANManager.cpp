@@ -177,22 +177,52 @@ CANManagerStatus RoboMasterCANManager::emergencyStopMotor(uint8_t motor_id) {
 }
 
 void RoboMasterCANManager::handleCANReceive() {
+    if (!started_) {
+        rx_error_count_++;
+        return;
+    }
+    
     CAN_RxHeaderTypeDef rx_header;
     uint8_t rx_data[8];
     
+    // Check FIFO0 pending message count to prevent infinite loop
+    uint32_t pending_messages = HAL_CAN_GetRxFifoFillLevel(hcan_, CAN_RX_FIFO0);
+    if (pending_messages == 0) {
+        return;  // No messages pending
+    }
+    
     // Get message from FIFO0
-    if (HAL_CAN_GetRxMessage(hcan_, CAN_RX_FIFO0, &rx_header, rx_data) == HAL_OK) {
-        handleCANReceive(rx_header.StdId, rx_data, rx_header.DLC);
-        last_rx_time_ = getCurrentTimeMs();
+    HAL_StatusTypeDef status = HAL_CAN_GetRxMessage(hcan_, CAN_RX_FIFO0, &rx_header, rx_data);
+    if (status == HAL_OK) {
+        // Validate message format
+        if (rx_header.IDE == CAN_ID_STD && rx_header.RTR == CAN_RTR_DATA && rx_header.DLC <= 8) {
+            handleCANReceive(rx_header.StdId, rx_data, rx_header.DLC);
+            last_rx_time_ = getCurrentTimeMs();
+        } else {
+            rx_error_count_++;  // Invalid message format
+        }
     } else {
         rx_error_count_++;
         handleReceptionError();
+        
+        // Check for FIFO overrun and clear if necessary
+        if (__HAL_CAN_GET_FLAG(hcan_, CAN_FLAG_FOV0)) {
+            __HAL_CAN_CLEAR_FLAG(hcan_, CAN_FLAG_FOV0);
+        }
     }
 }
 
 void RoboMasterCANManager::handleCANReceive(uint32_t rx_id, const uint8_t* data, uint8_t length) {
     // Determine motor ID from CAN ID
     uint8_t motor_id = getMotorIdFromCANId(rx_id);
+    
+    // Debug: Toggle LED when CAN message received (quick blink for debugging)
+    static uint32_t last_led_toggle = 0;
+    uint32_t current_time = getCurrentTimeMs();
+    if (current_time - last_led_toggle > 100) {  // Max 10Hz toggle rate
+        HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_5);
+        last_led_toggle = current_time;
+    }
     
     if (isValidMotorId(motor_id)) {
         processMotorFeedback(motor_id, data, length);
@@ -218,23 +248,29 @@ void RoboMasterCANManager::update() {
 
 CANManagerStatus RoboMasterCANManager::setupCANFilters() {
     CAN_FilterTypeDef filter_config;
-    
+
     // Configure filter to accept RoboMaster feedback messages (0x201-0x208)
     filter_config.FilterBank = 0;
     filter_config.FilterMode = CAN_FILTERMODE_IDMASK;
     filter_config.FilterScale = CAN_FILTERSCALE_32BIT;
-    filter_config.FilterIdHigh = (RoboMasterCANIDs::MOTOR_FEEDBACK_BASE << 5);
+
+    // Use base 0x200 for proper masking to receive 0x201-0x208
+    filter_config.FilterIdHigh = (0x200 << 5);
     filter_config.FilterIdLow = 0;
-    filter_config.FilterMaskIdHigh = (0x1F8 << 5);  // Mask to accept 0x201-0x208
+
+    // Mask 0x7F0 allows 0x200-0x20F (which includes 0x201-0x208)
+    // This ensures all motor feedback IDs (1-8) are properly received
+    filter_config.FilterMaskIdHigh = (0x7F0 << 5);
     filter_config.FilterMaskIdLow = 0;
+
     filter_config.FilterFIFOAssignment = CAN_FILTER_FIFO0;
     filter_config.FilterActivation = ENABLE;
     filter_config.SlaveStartFilterBank = 14;
-    
+
     if (HAL_CAN_ConfigFilter(hcan_, &filter_config) != HAL_OK) {
         return CANManagerStatus::CAN_ERROR;
     }
-    
+
     return CANManagerStatus::OK;
 }
 
@@ -314,6 +350,13 @@ void RoboMasterCANManager::handleTransmissionError() {
 
 void RoboMasterCANManager::handleReceptionError() {
     // Could implement error recovery logic here
+}
+
+uint32_t RoboMasterCANManager::getPendingRxMessages() const {
+    if (!started_ || hcan_ == nullptr) {
+        return 0;
+    }
+    return HAL_CAN_GetRxFifoFillLevel(hcan_, CAN_RX_FIFO0);
 }
 
 void RoboMasterCANManager::clearCommandBuffer(CANMotorCommand* buffer, size_t size) {

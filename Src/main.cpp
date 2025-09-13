@@ -34,6 +34,7 @@ ServoMotor servo3;
 RoboMasterCANManager can_manager;
 RoboMasterMotor gm6020_1;
 // RoboMasterMotor gm6020_2;
+RoboMasterConfig motor_config;
 
 
 void setup() {
@@ -58,7 +59,9 @@ void setup() {
     can_manager.start();
     
     gm6020_1.create(5, &can_manager);
-    gm6020_1.init();
+    gm6020_1.init(motor_config);
+    gm6020_1.setControlMode(RoboMasterControlMode::POSITION);
+    gm6020_1.setPositionRad(0.0f);
     gm6020_1.setEnabled(true);
     
     // gm6020_2.create(6, &can_manager);
@@ -82,8 +85,9 @@ void setup() {
 }
 
 void loop() {
-    // Process any received UART data from interrupt buffer
-    while (uart_rx_tail != uart_rx_head) {
+    // Process any received UART data from interrupt buffer (limit iterations to prevent infinite loop)
+    uint8_t max_iterations = 32;  // Process max 32 bytes per loop
+    while (uart_rx_tail != uart_rx_head && max_iterations-- > 0) {
         // Disable interrupts temporarily to ensure atomic access
         __disable_irq();
         uint16_t local_head = uart_rx_head;
@@ -110,7 +114,7 @@ void loop() {
     mavlink_controller.update();
     mavlink_robomaster_controller.update();
     
-    // Update CAN manager
+    // Update CAN manager (this also updates all registered motors)
     can_manager.update();
     
     // Short delay to prevent tight loop

@@ -2,19 +2,26 @@
 #include <cstring>
 #include <cstdio>
 
-MAVLinkRoboMasterController::MAVLinkRoboMasterController() 
+MAVLinkRoboMasterController::MAVLinkRoboMasterController()
     : uart_(nullptr), system_id_(1), can_manager_(nullptr),
       last_heartbeat_(0), last_telemetry_(0), telemetry_rate_ms_(TELEMETRY_RATE_MS),
       telemetry_enabled_(true), parameter_count_(0) {
-    
+
     // Initialize motor registry
     for (int i = 0; i < MAX_MOTORS; i++) {
         motors_[i] = nullptr;
         motor_registered_[i] = false;
     }
-    
+
     // Initialize parameters
     initializeParameters();
+}
+
+MAVLinkRoboMasterController::~MAVLinkRoboMasterController() {
+    // Clean up allocated parameter names
+    for (uint16_t i = 0; i < parameter_count_; i++) {
+        delete[] parameters_[i].name;
+    }
 }
 
 void MAVLinkRoboMasterController::init(UART_HandleTypeDef* uart, uint8_t system_id) {
@@ -102,6 +109,14 @@ void MAVLinkRoboMasterController::handleMessage(mavlink_message_t* msg) {
             
         case MAVLINK_MSG_ID_ROBOMASTER_MOTOR_CONFIG:
             handleMotorConfigSet(msg);
+            break;
+
+        case MAVLINK_MSG_ID_ROBOMASTER_MOTOR_STATUS:
+            handleMotorStatusRequest(msg);
+            break;
+
+        case MAVLINK_MSG_ID_ROBOMASTER_TELEMETRY:
+            handleMotorConfigGet(msg);
             break;
             
         default:
@@ -296,42 +311,125 @@ void MAVLinkRoboMasterController::sendMotorStatus(uint8_t motor_id) {
     if (motor == nullptr) {
         return;
     }
-    
-    // Send as servo output raw message for compatibility
-    mavlink_message_t msg;
-    
+
     const RoboMasterState& state = motor->getState();
-    
-    // Convert values for MAVLink
-    uint16_t pulse_us = static_cast<uint16_t>(1500 + (state.currentVelocityRPS / 100.0f) * 500);
-    pulse_us = (pulse_us < 1000) ? 1000 : (pulse_us > 2000) ? 2000 : pulse_us;
-    
-    uint16_t servo_values[16] = {0};
-    servo_values[motor_id - 1] = pulse_us;
-    
-    mavlink_msg_servo_output_raw_pack(system_id_, MAV_COMP_ID_AUTOPILOT1, &msg,
-                                     getCurrentTimeMs() * 1000ULL,
-                                     0,  // port
-                                     servo_values[0], servo_values[1], servo_values[2], servo_values[3],
-                                     servo_values[4], servo_values[5], servo_values[6], servo_values[7],
-                                     servo_values[8], servo_values[9], servo_values[10], servo_values[11],
-                                     servo_values[12], servo_values[13], servo_values[14], servo_values[15]);
-    
+
+    // Send comprehensive motor status as custom MAVLink message
+    mavlink_message_t msg;
+    uint8_t payload[64] = {0};
+    uint16_t payload_len = 0;
+
+    // Motor ID
+    payload[payload_len++] = motor_id;
+
+    // Current measurements (position, velocity, current, temperature)
+    memcpy(&payload[payload_len], &state.currentPositionRad, sizeof(float));
+    payload_len += sizeof(float);
+
+    memcpy(&payload[payload_len], &state.currentVelocityRPS, sizeof(float));
+    payload_len += sizeof(float);
+
+    memcpy(&payload[payload_len], &state.currentMilliamps, sizeof(int16_t));
+    payload_len += sizeof(int16_t);
+
+    payload[payload_len++] = state.temperatureCelsius;
+
+    // Target values
+    memcpy(&payload[payload_len], &state.targetPositionRad, sizeof(float));
+    payload_len += sizeof(float);
+
+    memcpy(&payload[payload_len], &state.targetVelocityRPS, sizeof(float));
+    payload_len += sizeof(float);
+
+    memcpy(&payload[payload_len], &state.targetCurrent, sizeof(int16_t));
+    payload_len += sizeof(int16_t);
+
+    // Status flags
+    payload[payload_len++] = static_cast<uint8_t>(state.controlMode);
+    payload[payload_len++] = state.enabled ? 1 : 0;
+    payload[payload_len++] = static_cast<uint8_t>(state.status);
+
+    // Statistics (pack as uint16_t to save space)
+    uint16_t error_count = static_cast<uint16_t>(state.errorCount > 65535 ? 65535 : state.errorCount);
+    uint16_t timeout_count = static_cast<uint16_t>(state.timeoutCount > 65535 ? 65535 : state.timeoutCount);
+    uint16_t overheat_count = static_cast<uint16_t>(state.overHeatCount > 65535 ? 65535 : state.overHeatCount);
+
+    memcpy(&payload[payload_len], &error_count, sizeof(uint16_t));
+    payload_len += sizeof(uint16_t);
+
+    memcpy(&payload[payload_len], &timeout_count, sizeof(uint16_t));
+    payload_len += sizeof(uint16_t);
+
+    memcpy(&payload[payload_len], &overheat_count, sizeof(uint16_t));
+    payload_len += sizeof(uint16_t);
+
+    // Timestamps (use relative time in ms, pack as uint32_t)
+    uint32_t current_time = getCurrentTimeMs();
+    uint32_t last_command_age = current_time - state.lastCommandTime;
+    uint32_t last_feedback_age = current_time - state.lastFeedbackTime;
+
+    memcpy(&payload[payload_len], &last_command_age, sizeof(uint32_t));
+    payload_len += sizeof(uint32_t);
+
+    memcpy(&payload[payload_len], &last_feedback_age, sizeof(uint32_t));
+    payload_len += sizeof(uint32_t);
+
+    // Create custom status message
+    msg.msgid = MAVLINK_MSG_ID_ROBOMASTER_MOTOR_STATUS;
+    msg.len = payload_len;
+    msg.sysid = system_id_;
+    msg.compid = MAV_COMP_ID_AUTOPILOT1;
+    memcpy(msg.payload64, payload, payload_len);
+
     sendMessage(&msg);
+
+    // Also send as status text for human readability
+    char status_text[100];
+    snprintf(status_text, sizeof(status_text),
+             "M%d: pos=%.1f vel=%.1f cur=%d temp=%d %s %s",
+             motor_id,
+             state.currentPositionRad,
+             state.currentVelocityRPS,
+             state.currentMilliamps,
+             state.temperatureCelsius,
+             state.enabled ? "EN" : "DIS",
+             state.status == RoboMasterStatus::OK ? "OK" : "ERR");
+
+    sendStatusText(MAV_SEVERITY_INFO, status_text);
 }
 
 void MAVLinkRoboMasterController::sendParameterValue(uint16_t param_index) {
     if (param_index >= parameter_count_) {
         return;
     }
-    
+
     const ParameterInfo& param = parameters_[param_index];
-    
+
+    // Get parameter value based on type
+    float param_value;
+    switch (param.type) {
+        case ParamType::FLOAT:
+            param_value = *static_cast<float*>(param.value_ptr);
+            break;
+        case ParamType::INT16:
+            param_value = static_cast<float>(*static_cast<int16_t*>(param.value_ptr));
+            break;
+        case ParamType::UINT8:
+            param_value = static_cast<float>(*static_cast<uint8_t*>(param.value_ptr));
+            break;
+        case ParamType::UINT32:
+            param_value = static_cast<float>(*static_cast<uint32_t*>(param.value_ptr));
+            break;
+        default:
+            param_value = 0.0f;
+            break;
+    }
+
     mavlink_message_t msg;
     mavlink_msg_param_value_pack(system_id_, MAV_COMP_ID_AUTOPILOT1, &msg,
-                                param.name, *(param.value_ptr), MAVLINK_TYPE_FLOAT,
+                                param.name, param_value, MAVLINK_TYPE_FLOAT,
                                 parameter_count_, param_index);
-    
+
     sendMessage(&msg);
 }
 
@@ -361,44 +459,64 @@ void MAVLinkRoboMasterController::registerMotorParameters(uint8_t motor_id) {
     
     // Control parameters
     snprintf(param_name, sizeof(param_name), "M%d_POS_KP", motor_id);
-    parameters_[parameter_count_] = {strdup(param_name), &config.positionKp, 0.0f, 1000.0f, motor_id};
+    char* name_copy = new char[strlen(param_name) + 1];
+    strcpy(name_copy, param_name);
+    parameters_[parameter_count_] = {name_copy, &config.positionKp, ParamType::FLOAT, 0.0f, 1000.0f, motor_id};
     parameter_count_++;
-    
+
     snprintf(param_name, sizeof(param_name), "M%d_POS_KI", motor_id);
-    parameters_[parameter_count_] = {strdup(param_name), &config.positionKi, 0.0f, 100.0f, motor_id};
+    name_copy = new char[strlen(param_name) + 1];
+    strcpy(name_copy, param_name);
+    parameters_[parameter_count_] = {name_copy, &config.positionKi, ParamType::FLOAT, 0.0f, 100.0f, motor_id};
     parameter_count_++;
-    
+
     snprintf(param_name, sizeof(param_name), "M%d_POS_KD", motor_id);
-    parameters_[parameter_count_] = {strdup(param_name), &config.positionKd, 0.0f, 100.0f, motor_id};
+    name_copy = new char[strlen(param_name) + 1];
+    strcpy(name_copy, param_name);
+    parameters_[parameter_count_] = {name_copy, &config.positionKd, ParamType::FLOAT, 0.0f, 100.0f, motor_id};
     parameter_count_++;
-    
+
     snprintf(param_name, sizeof(param_name), "M%d_VEL_KP", motor_id);
-    parameters_[parameter_count_] = {strdup(param_name), &config.velocityKp, 0.0f, 1000.0f, motor_id};
+    name_copy = new char[strlen(param_name) + 1];
+    strcpy(name_copy, param_name);
+    parameters_[parameter_count_] = {name_copy, &config.velocityKp, ParamType::FLOAT, 0.0f, 1000.0f, motor_id};
     parameter_count_++;
-    
+
     snprintf(param_name, sizeof(param_name), "M%d_VEL_KI", motor_id);
-    parameters_[parameter_count_] = {strdup(param_name), &config.velocityKi, 0.0f, 100.0f, motor_id};
+    name_copy = new char[strlen(param_name) + 1];
+    strcpy(name_copy, param_name);
+    parameters_[parameter_count_] = {name_copy, &config.velocityKi, ParamType::FLOAT, 0.0f, 100.0f, motor_id};
     parameter_count_++;
-    
+
     snprintf(param_name, sizeof(param_name), "M%d_VEL_KD", motor_id);
-    parameters_[parameter_count_] = {strdup(param_name), &config.velocityKd, 0.0f, 100.0f, motor_id};
+    name_copy = new char[strlen(param_name) + 1];
+    strcpy(name_copy, param_name);
+    parameters_[parameter_count_] = {name_copy, &config.velocityKd, ParamType::FLOAT, 0.0f, 100.0f, motor_id};
     parameter_count_++;
-    
+
     // Limit parameters
     snprintf(param_name, sizeof(param_name), "M%d_MAX_VEL", motor_id);
-    parameters_[parameter_count_] = {strdup(param_name), &config.maxVelocityRPS, 1.0f, 200.0f, motor_id};
+    name_copy = new char[strlen(param_name) + 1];
+    strcpy(name_copy, param_name);
+    parameters_[parameter_count_] = {name_copy, &config.maxVelocityRPS, ParamType::FLOAT, 1.0f, 200.0f, motor_id};
     parameter_count_++;
-    
+
     snprintf(param_name, sizeof(param_name), "M%d_MAX_CUR", motor_id);
-    parameters_[parameter_count_] = {strdup(param_name), reinterpret_cast<float*>(&config.maxCurrent), 100.0f, 20000.0f, motor_id};
+    name_copy = new char[strlen(param_name) + 1];
+    strcpy(name_copy, param_name);
+    parameters_[parameter_count_] = {name_copy, &config.maxCurrent, ParamType::INT16, 100.0f, 20000.0f, motor_id};
     parameter_count_++;
-    
+
     snprintf(param_name, sizeof(param_name), "M%d_MAX_TEMP", motor_id);
-    parameters_[parameter_count_] = {strdup(param_name), reinterpret_cast<float*>(&config.maxTemperature), 40.0f, 100.0f, motor_id};
+    name_copy = new char[strlen(param_name) + 1];
+    strcpy(name_copy, param_name);
+    parameters_[parameter_count_] = {name_copy, &config.maxTemperature, ParamType::UINT8, 40.0f, 100.0f, motor_id};
     parameter_count_++;
-    
+
     snprintf(param_name, sizeof(param_name), "M%d_TIMEOUT", motor_id);
-    parameters_[parameter_count_] = {strdup(param_name), reinterpret_cast<float*>(&config.watchdogTimeoutMs), 50.0f, 5000.0f, motor_id};
+    name_copy = new char[strlen(param_name) + 1];
+    strcpy(name_copy, param_name);
+    parameters_[parameter_count_] = {name_copy, &config.watchdogTimeoutMs, ParamType::UINT32, 50.0f, 5000.0f, motor_id};
     parameter_count_++;
 }
 
@@ -422,24 +540,39 @@ bool MAVLinkRoboMasterController::setParameterValue(uint16_t param_index, float 
     if (param_index >= parameter_count_) {
         return false;
     }
-    
+
     const ParameterInfo& param = parameters_[param_index];
-    
+
     // Validate range
     if (value < param.min_value || value > param.max_value) {
         return false;
     }
-    
-    // Set the value
-    *(param.value_ptr) = value;
-    
+
+    // Set the value based on type
+    switch (param.type) {
+        case ParamType::FLOAT:
+            *static_cast<float*>(param.value_ptr) = value;
+            break;
+        case ParamType::INT16:
+            *static_cast<int16_t*>(param.value_ptr) = static_cast<int16_t>(value);
+            break;
+        case ParamType::UINT8:
+            *static_cast<uint8_t*>(param.value_ptr) = static_cast<uint8_t>(value);
+            break;
+        case ParamType::UINT32:
+            *static_cast<uint32_t*>(param.value_ptr) = static_cast<uint32_t>(value);
+            break;
+        default:
+            return false;
+    }
+
     // Apply to motor if needed
     RoboMasterMotor* motor = findMotor(param.motor_id);
     if (motor != nullptr) {
         // This would require a method to update motor configuration
         // motor->updateParameter(param.name, value);
     }
-    
+
     return true;
 }
 
@@ -496,6 +629,221 @@ void MAVLinkRoboMasterController::loadParametersFromFlash() {
 }
 
 // Missing method implementations
+
+void MAVLinkRoboMasterController::handleMotorConfigGet(mavlink_message_t* msg) {
+    // Handle custom RoboMaster motor configuration request
+
+    // Validate message length
+    if (msg->len < 1) {
+        sendStatusText(MAV_SEVERITY_ERROR, "Config get msg too short");
+        return;
+    }
+
+    const uint8_t* payload = reinterpret_cast<const uint8_t*>(msg->payload64);
+    uint8_t motor_id = payload[0];
+
+    // Validate motor ID
+    if (motor_id < 1 || motor_id > MAX_MOTORS) {
+        sendStatusText(MAV_SEVERITY_ERROR, "Invalid motor ID for config get");
+        return;
+    }
+
+    RoboMasterMotor* motor = findMotor(motor_id);
+    if (motor == nullptr) {
+        char error_msg[50];
+        snprintf(error_msg, sizeof(error_msg), "Motor %d not found for config get", motor_id);
+        sendStatusText(MAV_SEVERITY_ERROR, error_msg);
+        return;
+    }
+
+    // Send motor configuration back
+    const RoboMasterConfig& config = motor->getConfig();
+    sendMotorConfig(motor_id, config);
+}
+
+void MAVLinkRoboMasterController::handleMotorStatusRequest(mavlink_message_t* msg) {
+    // Handle motor status request
+
+    // Validate message length
+    if (msg->len < 1) {
+        sendStatusText(MAV_SEVERITY_ERROR, "Status request msg too short");
+        return;
+    }
+
+    const uint8_t* payload = reinterpret_cast<const uint8_t*>(msg->payload64);
+    uint8_t motor_id = payload[0];
+
+    if (motor_id == 0) {
+        // Send status for all registered motors
+        uint8_t motors_sent = 0;
+        for (uint8_t i = 1; i <= MAX_MOTORS; i++) {
+            if (motor_registered_[i - 1] && motors_[i - 1] != nullptr) {
+                sendMotorStatus(i);
+                motors_sent++;
+                HAL_Delay(5); // Small delay to prevent bus saturation
+            }
+        }
+
+        if (motors_sent == 0) {
+            sendStatusText(MAV_SEVERITY_INFO, "No motors registered");
+        }
+    } else {
+        // Validate specific motor ID
+        if (motor_id > MAX_MOTORS) {
+            sendStatusText(MAV_SEVERITY_ERROR, "Invalid motor ID for status");
+            return;
+        }
+
+        if (!motor_registered_[motor_id - 1] || motors_[motor_id - 1] == nullptr) {
+            char error_msg[50];
+            snprintf(error_msg, sizeof(error_msg), "Motor %d not registered", motor_id);
+            sendStatusText(MAV_SEVERITY_ERROR, error_msg);
+            return;
+        }
+
+        sendMotorStatus(motor_id);
+    }
+}
+
+void MAVLinkRoboMasterController::sendParameterValue(const char* param_name, float value) {
+    int16_t param_index = findParameterIndex(param_name);
+    if (param_index >= 0) {
+        sendParameterValue(static_cast<uint16_t>(param_index));
+    }
+}
+
+bool MAVLinkRoboMasterController::setParameterValue(const char* param_name, float value) {
+    int16_t param_index = findParameterIndex(param_name);
+    if (param_index >= 0) {
+        return setParameterValue(static_cast<uint16_t>(param_index), value);
+    }
+    return false;
+}
+
+void MAVLinkRoboMasterController::saveMotorConfig(uint8_t motor_id) {
+    RoboMasterMotor* motor = findMotor(motor_id);
+    if (motor != nullptr) {
+        // TODO: Implement motor-specific configuration saving
+        char message[50];
+        snprintf(message, sizeof(message), "Motor %d config saved", motor_id);
+        sendStatusText(MAV_SEVERITY_INFO, message);
+    }
+}
+
+void MAVLinkRoboMasterController::loadMotorConfig(uint8_t motor_id) {
+    RoboMasterMotor* motor = findMotor(motor_id);
+    if (motor != nullptr) {
+        // TODO: Implement motor-specific configuration loading
+        char message[50];
+        snprintf(message, sizeof(message), "Motor %d config loaded", motor_id);
+        sendStatusText(MAV_SEVERITY_INFO, message);
+    }
+}
+
+void MAVLinkRoboMasterController::resetMotorConfig(uint8_t motor_id) {
+    RoboMasterMotor* motor = findMotor(motor_id);
+    if (motor != nullptr) {
+        RoboMasterConfig default_config;
+        motor->setConfig(default_config);
+        char message[50];
+        snprintf(message, sizeof(message), "Motor %d config reset", motor_id);
+        sendStatusText(MAV_SEVERITY_INFO, message);
+    }
+}
+
+void MAVLinkRoboMasterController::emergencyStopMotor(uint8_t motor_id) {
+    RoboMasterMotor* motor = findMotor(motor_id);
+    if (motor != nullptr) {
+        motor->setEnabled(false);
+        motor->setCurrent(0);
+        char message[50];
+        snprintf(message, sizeof(message), "Motor %d emergency stop", motor_id);
+        sendStatusText(MAV_SEVERITY_WARNING, message);
+    }
+}
+
+bool MAVLinkRoboMasterController::validateMotorCommand(uint8_t motor_id, float value, const char* param_type) {
+    RoboMasterMotor* motor = findMotor(motor_id);
+    if (motor == nullptr) {
+        return false;
+    }
+
+    const RoboMasterConfig& config = motor->getConfig();
+
+    if (strcmp(param_type, "velocity") == 0) {
+        return (value >= -config.maxVelocityRPS && value <= config.maxVelocityRPS);
+    } else if (strcmp(param_type, "current") == 0) {
+        return (value >= config.minCurrent && value <= config.maxCurrent);
+    } else if (strcmp(param_type, "position") == 0) {
+        if (config.positionLimitsEnabled) {
+            return (value >= config.minPositionRad && value <= config.maxPositionRad);
+        }
+        return true; // No limits enabled
+    }
+
+    return false;
+}
+
+void MAVLinkRoboMasterController::sendMotorConfig(uint8_t motor_id, const RoboMasterConfig& config) {
+    // Send motor configuration as custom MAVLink message
+    mavlink_message_t msg;
+
+    // Create a custom message with motor config data
+    uint8_t payload[64] = {0};
+    uint16_t payload_len = 0;
+
+    // Validate motor ID before sending
+    if (motor_id < 1 || motor_id > MAX_MOTORS) {
+        sendStatusText(MAV_SEVERITY_ERROR, "Invalid motor ID for config send");
+        return;
+    }
+
+    payload[payload_len++] = motor_id;
+
+    // Pack essential config parameters with bounds checking
+    if (payload_len + sizeof(float) > sizeof(payload)) {
+        sendStatusText(MAV_SEVERITY_ERROR, "Config payload too large");
+        return;
+    }
+    memcpy(&payload[payload_len], &config.maxVelocityRPS, sizeof(float));
+    payload_len += sizeof(float);
+
+    if (payload_len + sizeof(int16_t) > sizeof(payload)) {
+        sendStatusText(MAV_SEVERITY_ERROR, "Config payload too large");
+        return;
+    }
+    memcpy(&payload[payload_len], &config.maxCurrent, sizeof(int16_t));
+    payload_len += sizeof(int16_t);
+
+    if (payload_len + sizeof(float) > sizeof(payload)) {
+        sendStatusText(MAV_SEVERITY_ERROR, "Config payload too large");
+        return;
+    }
+    memcpy(&payload[payload_len], &config.positionKp, sizeof(float));
+    payload_len += sizeof(float);
+
+    if (payload_len + sizeof(float) > sizeof(payload)) {
+        sendStatusText(MAV_SEVERITY_ERROR, "Config payload too large");
+        return;
+    }
+    memcpy(&payload[payload_len], &config.velocityKp, sizeof(float));
+    payload_len += sizeof(float);
+
+    // Ensure payload length doesn't exceed MAVLink limits
+    if (payload_len > MAVLINK_MAX_PAYLOAD_LEN) {
+        sendStatusText(MAV_SEVERITY_ERROR, "Config payload exceeds MAVLink limit");
+        return;
+    }
+
+    // Create message with custom ID
+    msg.msgid = MAVLINK_MSG_ID_ROBOMASTER_MOTOR_CONFIG;
+    msg.len = payload_len;
+    msg.sysid = system_id_;
+    msg.compid = MAV_COMP_ID_AUTOPILOT1;
+    memcpy(msg.payload64, payload, payload_len);
+
+    sendMessage(&msg);
+}
 
 void MAVLinkRoboMasterController::handleHeartbeat(mavlink_message_t* msg) {
     mavlink_heartbeat_t heartbeat;
@@ -560,61 +908,140 @@ void MAVLinkRoboMasterController::handleRequestDataStream(mavlink_message_t* msg
 void MAVLinkRoboMasterController::handleMotorControl(mavlink_message_t* msg) {
     // Handle custom RoboMaster motor control message
     // This would need custom MAVLink message definitions
-    
-    // For now, extract basic data assuming a simple format
+
+    // Validate message length first
+    if (msg->len < 6) {
+        sendStatusText(MAV_SEVERITY_ERROR, "Motor control msg too short");
+        return;
+    }
+
     const uint8_t* payload = reinterpret_cast<const uint8_t*>(msg->payload64);
-    
-    if (msg->len >= 8) {
-        uint8_t motor_id = payload[0];
-        uint8_t control_mode = payload[1]; // 0=current, 1=velocity, 2=position
-        
-        // Extract control value (little endian)
-        float control_value;
-        memcpy(&control_value, &payload[2], sizeof(float));
-        
-        RoboMasterMotor* motor = findMotor(motor_id);
-        if (motor != nullptr) {
-            switch (control_mode) {
-                case 0: // Current control
-                    motor->setCurrent(static_cast<int16_t>(control_value));
-                    break;
-                case 1: // Velocity control
-                    motor->setVelocityRPS(control_value);
-                    break;
-                case 2: // Position control
-                    motor->setPositionRad(control_value);
-                    break;
+
+    uint8_t motor_id = payload[0];
+    uint8_t control_mode = payload[1]; // 0=current, 1=velocity, 2=position
+
+    // Validate motor ID
+    if (motor_id < 1 || motor_id > MAX_MOTORS) {
+        sendStatusText(MAV_SEVERITY_ERROR, "Invalid motor ID");
+        return;
+    }
+
+    // Validate control mode
+    if (control_mode > 2) {
+        sendStatusText(MAV_SEVERITY_ERROR, "Invalid control mode");
+        return;
+    }
+
+    // Extract control value (little endian) - ensure we have enough bytes
+    if (msg->len < 6) {
+        sendStatusText(MAV_SEVERITY_ERROR, "Insufficient data for control value");
+        return;
+    }
+
+    float control_value;
+    memcpy(&control_value, &payload[2], sizeof(float));
+
+    RoboMasterMotor* motor = findMotor(motor_id);
+    if (motor == nullptr) {
+        char error_msg[50];
+        snprintf(error_msg, sizeof(error_msg), "Motor %d not found", motor_id);
+        sendStatusText(MAV_SEVERITY_ERROR, error_msg);
+        return;
+    }
+
+    // Validate command values before applying
+    bool valid_command = false;
+    switch (control_mode) {
+        case 0: // Current control
+            valid_command = validateMotorCommand(motor_id, control_value, "current");
+            if (valid_command) {
+                motor->setCurrent(static_cast<int16_t>(control_value));
             }
-        }
+            break;
+        case 1: // Velocity control
+            valid_command = validateMotorCommand(motor_id, control_value, "velocity");
+            if (valid_command) {
+                motor->setVelocityRPS(control_value);
+            }
+            break;
+        case 2: // Position control
+            valid_command = validateMotorCommand(motor_id, control_value, "position");
+            if (valid_command) {
+                motor->setPositionRad(control_value);
+            }
+            break;
+    }
+
+    if (!valid_command) {
+        char error_msg[80];
+        snprintf(error_msg, sizeof(error_msg), "Motor %d command out of range: %.2f", motor_id, control_value);
+        sendStatusText(MAV_SEVERITY_WARNING, error_msg);
     }
 }
 
 void MAVLinkRoboMasterController::handleMotorConfigSet(mavlink_message_t* msg) {
     // Handle custom RoboMaster motor configuration message
     // This would need custom MAVLink message definitions
-    
+
+    // Validate message length
+    if (msg->len < 6) {
+        sendStatusText(MAV_SEVERITY_ERROR, "Config msg too short");
+        return;
+    }
+
     const uint8_t* payload = reinterpret_cast<const uint8_t*>(msg->payload64);
-    
-    if (msg->len >= 12) {
-        uint8_t motor_id = payload[0];
-        uint8_t param_id = payload[1];
-        
-        // Extract parameter value (little endian)
-        float param_value;
-        memcpy(&param_value, &payload[2], sizeof(float));
-        
-        RoboMasterMotor* motor = findMotor(motor_id);
-        if (motor != nullptr) {
-            // Map param_id to actual parameters
-            const char* param_names[] = {
-                "positionKp", "positionKi", "positionKd",
-                "velocityKp", "velocityKi", "velocityKd",
-                "maxVelocityRPS", "maxCurrent", "maxTemperature"
-            };
-            
-            if (param_id < sizeof(param_names) / sizeof(param_names[0])) {
-                motor->updateParameter(param_names[param_id], param_value);
-            }
-        }
+
+    uint8_t motor_id = payload[0];
+    uint8_t param_id = payload[1];
+
+    // Validate motor ID
+    if (motor_id < 1 || motor_id > MAX_MOTORS) {
+        sendStatusText(MAV_SEVERITY_ERROR, "Invalid motor ID for config");
+        return;
+    }
+
+    // Extract parameter value (little endian) - ensure sufficient length
+    if (msg->len < 6) {
+        sendStatusText(MAV_SEVERITY_ERROR, "Insufficient config data");
+        return;
+    }
+
+    float param_value;
+    memcpy(&param_value, &payload[2], sizeof(float));
+
+    RoboMasterMotor* motor = findMotor(motor_id);
+    if (motor == nullptr) {
+        char error_msg[50];
+        snprintf(error_msg, sizeof(error_msg), "Motor %d not found for config", motor_id);
+        sendStatusText(MAV_SEVERITY_ERROR, error_msg);
+        return;
+    }
+
+    // Map param_id to actual parameters with bounds checking
+    const char* param_names[] = {
+        "positionKp", "positionKi", "positionKd",
+        "velocityKp", "velocityKi", "velocityKd",
+        "maxVelocityRPS", "maxCurrent", "maxTemperature"
+    };
+
+    const size_t num_params = sizeof(param_names) / sizeof(param_names[0]);
+
+    if (param_id >= num_params) {
+        char error_msg[60];
+        snprintf(error_msg, sizeof(error_msg), "Invalid param ID %d (max %zu)", param_id, num_params - 1);
+        sendStatusText(MAV_SEVERITY_ERROR, error_msg);
+        return;
+    }
+
+    // Update parameter with validation
+    RoboMasterStatus result = motor->updateParameter(param_names[param_id], param_value);
+    if (result == RoboMasterStatus::OK) {
+        char success_msg[80];
+        snprintf(success_msg, sizeof(success_msg), "Motor %d %s set to %.2f", motor_id, param_names[param_id], param_value);
+        sendStatusText(MAV_SEVERITY_INFO, success_msg);
+    } else {
+        char error_msg[80];
+        snprintf(error_msg, sizeof(error_msg), "Failed to set Motor %d %s", motor_id, param_names[param_id]);
+        sendStatusText(MAV_SEVERITY_ERROR, error_msg);
     }
 }

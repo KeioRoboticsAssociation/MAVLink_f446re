@@ -22,7 +22,7 @@ public:
     static constexpr uint32_t HEARTBEAT_RATE_MS = 1000; // 1Hz heartbeat
 
     MAVLinkRoboMasterController();
-    ~MAVLinkRoboMasterController() = default;
+    ~MAVLinkRoboMasterController();
 
     // Initialization
     void init(UART_HandleTypeDef* uart, uint8_t system_id = 1);
@@ -58,9 +58,12 @@ private:
     bool telemetry_enabled_;
     
     // Parameter management
+    enum class ParamType { FLOAT, INT16, UINT8, UINT32 };
+
     struct ParameterInfo {
         const char* name;
-        float* value_ptr;
+        void* value_ptr;  // Use void* due to mixed types
+        ParamType type;
         float min_value;
         float max_value;
         uint8_t motor_id;
@@ -94,6 +97,7 @@ private:
     void sendParameterValue(const char* param_name, float value);
     void sendCommandAck(uint16_t command, uint8_t result);
     void sendStatusText(uint8_t severity, const char* text);
+    void sendMotorConfig(uint8_t motor_id, const RoboMasterConfig& config);
     
     // Parameter system
     void initializeParameters();

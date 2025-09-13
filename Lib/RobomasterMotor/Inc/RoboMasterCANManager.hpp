@@ -17,7 +17,7 @@ enum class CANManagerStatus {
 namespace RoboMasterCANIDs {
     // Standard RoboMaster CAN IDs
     constexpr uint32_t MOTOR_CMD_ID_1_4 = 0x200;     // Motors 1-4 command
-    constexpr uint32_t MOTOR_CMD_ID_5_8 = 0x1FF;     // Motors 5-8 command
+    constexpr uint32_t MOTOR_CMD_ID_5_8 = 0x1FE;     // Motors 5-8 command
     constexpr uint32_t MOTOR_FEEDBACK_BASE = 0x201;  // Motor feedback base ID
     
     // Additional command IDs for extended control
@@ -70,6 +70,8 @@ public:
     uint32_t getTransmissionErrors() const { return tx_error_count_; }
     uint32_t getReceptionErrors() const { return rx_error_count_; }
     uint32_t getLastTransmissionTime() const { return last_tx_time_; }
+    uint32_t getLastReceptionTime() const { return last_rx_time_; }
+    uint32_t getPendingRxMessages() const;
     
     // Update method (call periodically)
     void update();

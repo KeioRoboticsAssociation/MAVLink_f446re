@@ -45,20 +45,23 @@ struct RoboMasterConfig {
     RoboMasterFailSafeBehavior failSafeBehavior = RoboMasterFailSafeBehavior::BRAKE;
     
     // Control parameters
-    float positionKp = 10.0f;                // Position P gain
+    float positionKp = 100.0f;                // Position P gain
     float positionKi = 0.0f;                 // Position I gain
-    float positionKd = 0.1f;                 // Position D gain
-    float velocityKp = 35.0f;                // Velocity P gain
-    float velocityKi = 0.15f;                // Velocity I gain
+    float positionKd = 0.0f;                 // Position D gain
+    float velocityKp = 1000.0f;                // Velocity P gain
+    float velocityKi = 0.0f;                // Velocity I gain
     float velocityKd = 0.0f;                 // Velocity D gain
+    float currentKp = 1.0f;               // Current P gain
+    float currentKi = 0.0f;                  // Current I gain
+    float currentKd = 0.0f;                  // Current D gain
     
     // Startup settings
     float startupPositionRad = 0.0f;         // Initial position
-    RoboMasterControlMode startupMode = RoboMasterControlMode::VELOCITY;
+    RoboMasterControlMode startupMode = RoboMasterControlMode::POSITION;
     bool startDisabled = false;              // Start in disabled state
     
     // Direction and offset
-    bool directionInverted = false;          // Invert rotation direction
+    bool directionInverted = true;          // Invert rotation direction
     float positionOffsetRad = 0.0f;          // Position offset
 };
 
@@ -81,6 +84,7 @@ struct RoboMasterState {
     
     // Statistics
     uint32_t lastCommandTime = 0;            // Last command timestamp
+    uint32_t lastFeedbackTime = 0;           // Last feedback reception timestamp
     uint32_t saturationCount = 0;            // Number of saturations
     uint32_t timeoutCount = 0;               // Number of timeouts
     uint32_t errorCount = 0;                 // Number of errors
@@ -147,7 +151,7 @@ public:
     RoboMasterControlMode getControlMode() const { return state_.controlMode; }
 
     // Update and maintenance
-    void update();
+    void __attribute__((noinline)) update();  // Prevent inlining to avoid optimization bugs
     void resetWatchdog();
     
     // CAN data processing (called by CAN manager)
@@ -174,6 +178,8 @@ private:
     float last_position_error_ = 0.0f;       // Last position error
     float velocity_integral_ = 0.0f;         // Velocity integral term
     float last_velocity_error_ = 0.0f;       // Last velocity error
+    float current_integral_ = 0.0f;          // Current integral term
+    float last_current_error_ = 0.0f;        // Last current error
     uint32_t last_update_time_ = 0;          // Last update timestamp
     
     // Rate limiting
@@ -189,6 +195,7 @@ private:
     void handleTimeout();
     void applyFailSafe();
     void checkSafetyLimits();
+    void checkTimeoutStatus();  // Separate timeout checking function
     uint32_t getCurrentTimeMs() const;
     void sendCurrentCommand(int16_t current);
     
