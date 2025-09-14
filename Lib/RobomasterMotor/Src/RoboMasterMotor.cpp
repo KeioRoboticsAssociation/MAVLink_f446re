@@ -167,10 +167,10 @@ RoboMasterStatus RoboMasterMotor::setEnabled(bool enabled) {
     if (!initialized_) {
         return RoboMasterStatus::NOT_INITIALIZED;
     }
-    
+
     state_.enabled = enabled;
     state_.lastCommandTime = getCurrentTimeMs();
-    
+
     if (!enabled) {
         sendCurrentCommand(0);
         // Reset control state
@@ -178,7 +178,47 @@ RoboMasterStatus RoboMasterMotor::setEnabled(bool enabled) {
         velocity_integral_ = 0.0f;
         current_integral_ = 0.0f;
     }
-    
+
+    return RoboMasterStatus::OK;
+}
+
+RoboMasterStatus RoboMasterMotor::setInitialPosition(float initialPositionRad) {
+    if (!initialized_) {
+        return RoboMasterStatus::NOT_INITIALIZED;
+    }
+
+    // Check if we have received at least one feedback packet
+    if (!zero_set_) {
+        return RoboMasterStatus::NOT_INITIALIZED;
+    }
+
+    state_.lastCommandTime = getCurrentTimeMs();
+    resetWatchdog();
+
+    // Calculate the offset needed to make current position equal to initialPositionRad
+    // Current absolute position calculation: (current_raw_position - zero_position_rad_) + (position_wraps_ * 2π) + positionOffsetRad
+    // We want this to equal initialPositionRad after applying direction inversion
+
+
+    float current_raw_position = last_raw_position_;
+    float unwrapped_position = current_raw_position - zero_position_rad_;
+    unwrapped_position += (static_cast<float>(position_wraps_) * 2.0f * M_PI);
+
+    // Calculate new offset to make current position equal to initialPositionRad
+    float desired_position = config_.directionInverted ? -initialPositionRad : initialPositionRad;
+    config_.positionOffsetRad = desired_position - unwrapped_position;
+
+    // Update the current position immediately
+    state_.currentPositionRad = initialPositionRad;
+    state_.targetPositionRad = initialPositionRad;
+    zero_position_rad_ = initialPositionRad;  // Update zero position to current raw position
+
+    // Reset control integrators since we're changing the position reference
+    position_integral_ = 0.0f;
+    velocity_integral_ = 0.0f;
+    current_integral_ = 0.0f;
+    last_position_error_ = 0.0f;
+
     return RoboMasterStatus::OK;
 }
 
@@ -394,6 +434,7 @@ void RoboMasterMotor::processCANData(const uint8_t* data, uint8_t length) {
         last_raw_position_ = current_raw_position;
         absolute_position_rad_ = 0.0f;  // Start at zero
         position_wraps_ = 0;
+        setInitialPosition(65.0*M_PI/180.0);
     } else {
         // Improved wrap detection with hysteresis
         float position_delta = current_raw_position - last_raw_position_;
@@ -609,6 +650,8 @@ RoboMasterStatus RoboMasterMotor::updateParameter(const char* param_name, float 
         config_.directionInverted = (value > 0.5f);
     } else if (strcmp(param_name, "positionOffsetRad") == 0) {
         config_.positionOffsetRad = value;
+    } else if (strcmp(param_name, "initialPositionRad") == 0) {
+        config_.initialPositionRad = value;
     } else {
         return RoboMasterStatus::CONFIG_ERROR;
     }
@@ -668,7 +711,9 @@ float RoboMasterMotor::getParameter(const char* param_name) const {
         return config_.directionInverted ? 1.0f : 0.0f;
     } else if (strcmp(param_name, "positionOffsetRad") == 0) {
         return config_.positionOffsetRad;
+    } else if (strcmp(param_name, "initialPositionRad") == 0) {
+        return config_.initialPositionRad;
     }
-    
+
     return 0.0f;  // Parameter not found
 }

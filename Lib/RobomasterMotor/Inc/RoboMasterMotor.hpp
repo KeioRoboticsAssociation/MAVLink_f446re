@@ -31,8 +31,8 @@ struct RoboMasterConfig {
     // Physical limits
     float maxVelocityRPS = 100.0f;           // Max velocity in RPS
     float maxAccelerationRPS2 = 200.0f;     // Max acceleration in RPS^2
-    int16_t maxCurrent = 16000;              // Max current in mA
-    int16_t minCurrent = -16000;             // Min current in mA
+    int16_t maxCurrent = 25000;              // Max current in mA
+    int16_t minCurrent = -25000;             // Min current in mA
     
     // Position limits
     float minPositionRad = -100.0f * M_PI;   // Min position in radians
@@ -45,10 +45,10 @@ struct RoboMasterConfig {
     RoboMasterFailSafeBehavior failSafeBehavior = RoboMasterFailSafeBehavior::BRAKE;
     
     // Control parameters
-    float positionKp = 100.0f;                // Position P gain
+    float positionKp = 10.0f;                // Position P gain
     float positionKi = 0.0f;                 // Position I gain
     float positionKd = 0.0f;                 // Position D gain
-    float velocityKp = 1000.0f;                // Velocity P gain
+    float velocityKp = 2000.0f;                // Velocity P gain
     float velocityKi = 0.0f;                // Velocity I gain
     float velocityKd = 0.0f;                 // Velocity D gain
     float currentKp = 1.0f;               // Current P gain
@@ -57,6 +57,7 @@ struct RoboMasterConfig {
     
     // Startup settings
     float startupPositionRad = 0.0f;         // Initial position
+    float initialPositionRad = 0.0f;         // Position to set as reference (0 degrees)
     RoboMasterControlMode startupMode = RoboMasterControlMode::POSITION;
     bool startDisabled = false;              // Start in disabled state
     
@@ -120,6 +121,9 @@ public:
     RoboMasterStatus setCurrent(int16_t current);
     RoboMasterStatus setControlMode(RoboMasterControlMode mode);
     RoboMasterStatus setEnabled(bool enabled);
+
+    // Position initialization
+    RoboMasterStatus setInitialPosition(float initialPositionRad = 0.0f);
 
     // Configuration
     RoboMasterStatus setConfig(const RoboMasterConfig& config);

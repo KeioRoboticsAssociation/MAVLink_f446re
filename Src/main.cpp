@@ -4,6 +4,7 @@
 #include "RoboMasterMotor.hpp"
 #include "RoboMasterCANManager.hpp"
 #include "MAVLinkRoboMasterController.hpp"
+#include <cmath>
 
 // HAL objects
 //uart
@@ -61,8 +62,9 @@ void setup() {
     gm6020_1.create(5, &can_manager);
     gm6020_1.init(motor_config);
     gm6020_1.setControlMode(RoboMasterControlMode::POSITION);
-    gm6020_1.setPositionRad(0.0f);
     gm6020_1.setEnabled(true);
+    gm6020_1.setInitialPosition(30.0*M_PI/180.0);
+    gm6020_1.setPositionRad(0.0f);
     
     // gm6020_2.create(6, &can_manager);
     // gm6020_2.init();
