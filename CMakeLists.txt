@@ -14,8 +14,8 @@ set(CMAKE_C_EXTENSIONS ON)
 
 set(CMAKE CXX STANDARD 20)
 
-# -Wno-unused-parameterを無視する
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused-parameter")
+# Suppress common MAVLink warnings for cleaner builds
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused-parameter -Wno-address-of-packed-member -Wno-pedantic")
 
 
 # Define the build type

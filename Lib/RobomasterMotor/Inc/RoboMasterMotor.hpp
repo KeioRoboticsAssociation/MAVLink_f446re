@@ -40,7 +40,7 @@ struct RoboMasterConfig {
     bool positionLimitsEnabled = false;      // Enable position limits
     
     // Safety settings
-    uint32_t watchdogTimeoutMs = 1000;       // Watchdog timeout
+    uint32_t watchdogTimeoutMs = 3000;       // Watchdog timeout
     uint8_t maxTemperature = 80;             // Max temperature in Celsius
     RoboMasterFailSafeBehavior failSafeBehavior = RoboMasterFailSafeBehavior::BRAKE;
     

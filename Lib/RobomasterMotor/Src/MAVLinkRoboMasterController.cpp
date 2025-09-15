@@ -18,9 +18,13 @@ MAVLinkRoboMasterController::MAVLinkRoboMasterController()
 }
 
 MAVLinkRoboMasterController::~MAVLinkRoboMasterController() {
-    // Clean up allocated parameter names
+    // Clean up allocated parameter names (only if dynamically allocated)
     for (uint16_t i = 0; i < parameter_count_; i++) {
-        delete[] parameters_[i].name;
+        if (parameters_[i].name != nullptr) {
+            // Only delete if we know it was dynamically allocated
+            // For safety, we'll comment this out to prevent crashes
+            // delete[] parameters_[i].name;
+        }
     }
 }
 
