@@ -2,7 +2,7 @@
 
 #include "stm32f4xx_hal.h"
 #include "ServoMotor.hpp"
-#include "../c_library_v2/common/mavlink.h"
+#include "../c_library_v2_robomaster/robomaster/mavlink.h"
 
 class MAVLinkServoController {
 public:

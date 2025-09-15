@@ -325,72 +325,38 @@ void MAVLinkRoboMasterController::sendMotorStatus(uint8_t motor_id) {
 
     const RoboMasterState& state = motor->getState();
 
-    // Send comprehensive motor status as custom MAVLink message
+    // Send comprehensive motor status using proper MAVLink message
     mavlink_message_t msg;
-    uint8_t payload[64] = {0};
-    uint16_t payload_len = 0;
 
-    // Motor ID
-    payload[payload_len++] = motor_id;
-
-    // Current measurements (position, velocity, current, temperature)
-    memcpy(&payload[payload_len], &state.currentPositionRad, sizeof(float));
-    payload_len += sizeof(float);
-
-    memcpy(&payload[payload_len], &state.currentVelocityRPS, sizeof(float));
-    payload_len += sizeof(float);
-
-    memcpy(&payload[payload_len], &state.currentMilliamps, sizeof(int16_t));
-    payload_len += sizeof(int16_t);
-
-    payload[payload_len++] = state.temperatureCelsius;
-
-    // Target values
-    memcpy(&payload[payload_len], &state.targetPositionRad, sizeof(float));
-    payload_len += sizeof(float);
-
-    memcpy(&payload[payload_len], &state.targetVelocityRPS, sizeof(float));
-    payload_len += sizeof(float);
-
-    memcpy(&payload[payload_len], &state.targetCurrent, sizeof(int16_t));
-    payload_len += sizeof(int16_t);
-
-    // Status flags
-    payload[payload_len++] = static_cast<uint8_t>(state.controlMode);
-    payload[payload_len++] = state.enabled ? 1 : 0;
-    payload[payload_len++] = static_cast<uint8_t>(state.status);
-
-    // Statistics (pack as uint16_t to save space)
-    uint16_t error_count = static_cast<uint16_t>(state.errorCount > 65535 ? 65535 : state.errorCount);
-    uint16_t timeout_count = static_cast<uint16_t>(state.timeoutCount > 65535 ? 65535 : state.timeoutCount);
-    uint16_t overheat_count = static_cast<uint16_t>(state.overHeatCount > 65535 ? 65535 : state.overHeatCount);
-
-    memcpy(&payload[payload_len], &error_count, sizeof(uint16_t));
-    payload_len += sizeof(uint16_t);
-
-    memcpy(&payload[payload_len], &timeout_count, sizeof(uint16_t));
-    payload_len += sizeof(uint16_t);
-
-    memcpy(&payload[payload_len], &overheat_count, sizeof(uint16_t));
-    payload_len += sizeof(uint16_t);
-
-    // Timestamps (use relative time in ms, pack as uint32_t)
+    // Pack data into the proper MAVLink structure
     uint32_t current_time = getCurrentTimeMs();
     uint32_t last_command_age = current_time - state.lastCommandTime;
     uint32_t last_feedback_age = current_time - state.lastFeedbackTime;
 
-    memcpy(&payload[payload_len], &last_command_age, sizeof(uint32_t));
-    payload_len += sizeof(uint32_t);
+    // Convert counts to uint16_t with bounds checking
+    uint16_t error_count = static_cast<uint16_t>(state.errorCount > 65535 ? 65535 : state.errorCount);
+    uint16_t timeout_count = static_cast<uint16_t>(state.timeoutCount > 65535 ? 65535 : state.timeoutCount);
+    uint16_t overheat_count = static_cast<uint16_t>(state.overHeatCount > 65535 ? 65535 : state.overHeatCount);
 
-    memcpy(&payload[payload_len], &last_feedback_age, sizeof(uint32_t));
-    payload_len += sizeof(uint32_t);
-
-    // Create custom status message
-    msg.msgid = MAVLINK_MSG_ID_ROBOMASTER_MOTOR_STATUS;
-    msg.len = payload_len;
-    msg.sysid = system_id_;
-    msg.compid = MAV_COMP_ID_AUTOPILOT1;
-    memcpy(msg.payload64, payload, payload_len);
+    mavlink_msg_robomaster_motor_status_pack(
+        system_id_, MAV_COMP_ID_AUTOPILOT1, &msg,
+        motor_id,                                    // motor_id
+        state.currentPositionRad,                   // current_position
+        state.currentVelocityRPS,                   // current_velocity
+        state.currentMilliamps,                     // current_milliamps
+        state.temperatureCelsius,                   // temperature
+        state.targetPositionRad,                    // target_position
+        state.targetVelocityRPS,                    // target_velocity
+        state.targetCurrent,                        // target_current
+        static_cast<uint8_t>(state.controlMode),    // control_mode
+        state.enabled ? 1 : 0,                      // enabled
+        static_cast<uint8_t>(state.status),         // status
+        error_count,                                // error_count
+        timeout_count,                              // timeout_count
+        overheat_count,                             // overheat_count
+        last_command_age,                           // last_command_time
+        last_feedback_age                           // last_feedback_time
+    );
 
     sendMessage(&msg);
 
@@ -920,73 +886,71 @@ void MAVLinkRoboMasterController::handleMotorControl(mavlink_message_t* msg) {
     // Handle custom RoboMaster motor control message (ID 180)
     sendStatusText(MAV_SEVERITY_INFO, "Processing motor control msg ID 180");
 
-    // Validate message length first
-    if (msg->len < 6) {
-        sendStatusText(MAV_SEVERITY_ERROR, "Motor control msg too short");
-        return;
-    }
-
-    const uint8_t* payload = reinterpret_cast<const uint8_t*>(msg->payload64);
-
-    uint8_t motor_id = payload[0];
-    uint8_t control_mode = payload[1]; // 0=current, 1=velocity, 2=position
+    // Decode the message using the proper MAVLink functions
+    mavlink_robomaster_motor_control_t motor_control;
+    mavlink_msg_robomaster_motor_control_decode(msg, &motor_control);
 
     // Validate motor ID
-    if (motor_id < 1 || motor_id > MAX_MOTORS) {
+    if (motor_control.motor_id < 1 || motor_control.motor_id > MAX_MOTORS) {
         sendStatusText(MAV_SEVERITY_ERROR, "Invalid motor ID");
         return;
     }
 
     // Validate control mode
-    if (control_mode > 2) {
+    if (motor_control.control_mode > 2) {
         sendStatusText(MAV_SEVERITY_ERROR, "Invalid control mode");
         return;
     }
 
-    // Extract control value (little endian) - ensure we have enough bytes
-    if (msg->len < 6) {
-        sendStatusText(MAV_SEVERITY_ERROR, "Insufficient data for control value");
-        return;
-    }
-
-    float control_value;
-    memcpy(&control_value, &payload[2], sizeof(float));
-
-    RoboMasterMotor* motor = findMotor(motor_id);
+    RoboMasterMotor* motor = findMotor(motor_control.motor_id);
     if (motor == nullptr) {
         char error_msg[50];
-        snprintf(error_msg, sizeof(error_msg), "Motor %d not found", motor_id);
+        snprintf(error_msg, sizeof(error_msg), "Motor %d not found", motor_control.motor_id);
         sendStatusText(MAV_SEVERITY_ERROR, error_msg);
         return;
     }
 
+    // Handle enable/disable command
+    if (motor_control.enable == 0) {
+        motor->setEnabled(false);
+        sendStatusText(MAV_SEVERITY_INFO, "Motor disabled");
+        return;
+    } else if (motor_control.enable == 1) {
+        motor->setEnabled(true);
+    }
+
     // Validate command values before applying
     bool valid_command = false;
-    switch (control_mode) {
+    switch (motor_control.control_mode) {
         case 0: // Current control
-            valid_command = validateMotorCommand(motor_id, control_value, "current");
+            valid_command = validateMotorCommand(motor_control.motor_id, motor_control.control_value, "current");
             if (valid_command) {
-                motor->setCurrent(static_cast<int16_t>(control_value));
+                motor->setCurrent(static_cast<int16_t>(motor_control.control_value));
             }
             break;
         case 1: // Velocity control
-            valid_command = validateMotorCommand(motor_id, control_value, "velocity");
+            valid_command = validateMotorCommand(motor_control.motor_id, motor_control.control_value, "velocity");
             if (valid_command) {
-                motor->setVelocityRPS(control_value);
+                motor->setVelocityRPS(motor_control.control_value);
             }
             break;
         case 2: // Position control
-            valid_command = validateMotorCommand(motor_id, control_value, "position");
+            valid_command = validateMotorCommand(motor_control.motor_id, motor_control.control_value, "position");
             if (valid_command) {
-                motor->setPositionRad(control_value);
+                motor->setPositionRad(motor_control.control_value);
             }
             break;
     }
 
     if (!valid_command) {
         char error_msg[80];
-        snprintf(error_msg, sizeof(error_msg), "Motor %d command out of range: %.2f", motor_id, control_value);
+        snprintf(error_msg, sizeof(error_msg), "Motor %d command out of range: %.2f", motor_control.motor_id, motor_control.control_value);
         sendStatusText(MAV_SEVERITY_WARNING, error_msg);
+    } else {
+        char success_msg[80];
+        const char* mode_str[] = {"current", "velocity", "position"};
+        snprintf(success_msg, sizeof(success_msg), "Motor %d %s set to %.2f", motor_control.motor_id, mode_str[motor_control.control_mode], motor_control.control_value);
+        sendStatusText(MAV_SEVERITY_INFO, success_msg);
     }
 }
 

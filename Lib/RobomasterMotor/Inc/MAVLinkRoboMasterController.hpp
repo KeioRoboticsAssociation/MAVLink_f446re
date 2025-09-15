@@ -124,13 +124,11 @@ private:
     void emergencyStopMotor(uint8_t motor_id);
     bool validateMotorCommand(uint8_t motor_id, float value, const char* param_type);
     
-    // Custom MAVLink message IDs (using available message slots)
-    enum CustomMessageIDs {
-        MAVLINK_MSG_ID_ROBOMASTER_MOTOR_CONTROL = 180,
-        MAVLINK_MSG_ID_ROBOMASTER_MOTOR_STATUS = 181,
-        MAVLINK_MSG_ID_ROBOMASTER_MOTOR_CONFIG = 182,
-        MAVLINK_MSG_ID_ROBOMASTER_TELEMETRY = 183
-    };
+    // Custom MAVLink message IDs are now defined in the generated library
+    // MAVLINK_MSG_ID_ROBOMASTER_MOTOR_CONTROL = 180
+    // MAVLINK_MSG_ID_ROBOMASTER_MOTOR_STATUS = 181
+    // MAVLINK_MSG_ID_ROBOMASTER_MOTOR_CONFIG = 182
+    // MAVLINK_MSG_ID_ROBOMASTER_TELEMETRY = 183
     
     // Parameter categories for organization
     enum ParameterCategory {
