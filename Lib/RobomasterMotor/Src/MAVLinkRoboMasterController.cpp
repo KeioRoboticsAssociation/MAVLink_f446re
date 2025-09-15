@@ -73,6 +73,11 @@ void MAVLinkRoboMasterController::processReceivedByte(uint8_t byte) {
 }
 
 void MAVLinkRoboMasterController::handleMessage(mavlink_message_t* msg) {
+    // Debug: Print all received message IDs
+    char debug_msg[50];
+    snprintf(debug_msg, sizeof(debug_msg), "RX MSG ID: %d, len: %d", msg->msgid, msg->len);
+    sendStatusText(MAV_SEVERITY_INFO, debug_msg);
+
     switch (msg->msgid) {
         case MAVLINK_MSG_ID_HEARTBEAT:
             handleHeartbeat(msg);
