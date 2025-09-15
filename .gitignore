@@ -9,6 +9,7 @@ cmake
 cmake_install.cmake
 CLAUDE.md
 request.md
+mavlink_env/
 
 
 # work in progress

@@ -73,10 +73,12 @@ void MAVLinkRoboMasterController::processReceivedByte(uint8_t byte) {
 }
 
 void MAVLinkRoboMasterController::handleMessage(mavlink_message_t* msg) {
-    // Debug: Print all received message IDs
-    char debug_msg[50];
-    snprintf(debug_msg, sizeof(debug_msg), "RX MSG ID: %d, len: %d", msg->msgid, msg->len);
-    sendStatusText(MAV_SEVERITY_INFO, debug_msg);
+    // Debug: Print all received message IDs (only for custom messages to reduce spam)
+    if (msg->msgid >= 180 && msg->msgid <= 183) {
+        char debug_msg[50];
+        snprintf(debug_msg, sizeof(debug_msg), "RX MSG ID: %d, len: %d", msg->msgid, msg->len);
+        sendStatusText(MAV_SEVERITY_INFO, debug_msg);
+    }
 
     switch (msg->msgid) {
         case MAVLINK_MSG_ID_HEARTBEAT:
@@ -915,8 +917,8 @@ void MAVLinkRoboMasterController::handleRequestDataStream(mavlink_message_t* msg
 }
 
 void MAVLinkRoboMasterController::handleMotorControl(mavlink_message_t* msg) {
-    // Handle custom RoboMaster motor control message
-    // This would need custom MAVLink message definitions
+    // Handle custom RoboMaster motor control message (ID 180)
+    sendStatusText(MAV_SEVERITY_INFO, "Processing motor control msg ID 180");
 
     // Validate message length first
     if (msg->len < 6) {
