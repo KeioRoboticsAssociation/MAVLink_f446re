@@ -4,6 +4,9 @@
 #include "RoboMasterMotor.hpp"
 #include "RoboMasterCANManager.hpp"
 #include "MAVLinkRoboMasterController.hpp"
+#include "Encoder.hpp"
+#include "DCMotor.hpp"
+#include "MAVLinkDCMotorController.hpp"
 #include <cmath>
 
 // HAL objects
@@ -12,12 +15,16 @@ extern UART_HandleTypeDef huart2;
 //can
 extern CAN_HandleTypeDef hcan1;
 //timers
+extern TIM_HandleTypeDef htim1;// encoder
 extern TIM_HandleTypeDef htim2;
+extern TIM_HandleTypeDef htim3;// pwm
+extern TIM_HandleTypeDef htim4;// encoder
 extern TIM_HandleTypeDef htim12;
 
 // MAVLink communication
 MAVLinkServoController mavlink_controller;
 MAVLinkRoboMasterController mavlink_robomaster_controller;
+MAVLinkDCMotorController mavlink_dcmotor_controller;
 uint8_t rx_buffer[1];
 
 // Interrupt-safe circular buffer for UART data
@@ -26,10 +33,16 @@ static volatile uint8_t uart_rx_buffer[UART_BUFFER_SIZE];
 static volatile uint16_t uart_rx_head = 0;
 static volatile uint16_t uart_rx_tail = 0;
 
+// Encoders
+Encoder encoder_dcmotor;
+
 // Servo instances
 ServoMotor servo1;
 ServoMotor servo2;
 ServoMotor servo3;
+
+// DC Motor instances
+DCMotor dcmotor1(&htim3, TIM_CHANNEL_1, GPIOB, GPIO_PIN_8, true, 1000);
 
 // RoboMaster CAN manager and GM6020 motor instances
 RoboMasterCANManager can_manager;
@@ -39,6 +52,10 @@ RoboMasterConfig motor_config;
 
 
 void setup() {
+    // Initialize encoders
+    encoder_dcmotor.create(1, &htim1);
+    encoder_dcmotor.init();
+
     // Initialize servos
     servo1.create(1, &htim2, TIM_CHANNEL_1);
     servo1.init();
@@ -54,7 +71,47 @@ void setup() {
     servo3.init();
     servo3.setEnabled(true);
     servo3.setAngleDeg(0);
-    
+
+    // Initialize DC Motor
+    dcmotor1.setMotorId(10);  // Motor ID 10 for MAVLink
+    dcmotor1.start();
+
+    // Initialize DC Motor MAVLink controller
+    mavlink_dcmotor_controller.init(10, &dcmotor1, &encoder_dcmotor, &huart2, 1);
+
+    // Configure DC Motor with reasonable PID parameters
+    MotorConfig dc_motor_config;
+    dc_motor_config.motor_id = 10;
+    dc_motor_config.mode = MotorControlMode::POSITION_CONTROL;
+
+    // Speed control PID (inner loop)
+    dc_motor_config.speed_kp = 0.8f;
+    dc_motor_config.speed_ki = 0.0f;
+    dc_motor_config.speed_kd = 0.0f;
+    dc_motor_config.speed_max_integral = 10.0f;
+    dc_motor_config.speed_max_output = 1.0f;
+
+    // Position control PID (outer loop)
+    dc_motor_config.position_kp = 3.0f;
+    dc_motor_config.position_ki = 0.0f;
+    dc_motor_config.position_kd = 0.0f;
+    dc_motor_config.position_max_integral = 100.0f;
+    dc_motor_config.position_max_output = 10.0f;  // max speed rad/s
+
+    // Physical limits
+    dc_motor_config.max_speed_rad_s = 15.0f;
+    dc_motor_config.max_acceleration_rad_s2 = 50.0f;
+    dc_motor_config.use_position_limits = true;
+    dc_motor_config.position_limit_min_rad = -M_PI * 100.0f;  // -10 revolutions
+    dc_motor_config.position_limit_max_rad = M_PI * 100.0f;   // +10 revolutions
+
+    // Safety settings
+    dc_motor_config.watchdog_timeout_ms = 2000;  // 2 seconds timeout
+    dc_motor_config.control_period_ms = 10;      // 100Hz control
+
+    mavlink_dcmotor_controller.setConfig(dc_motor_config);
+    mavlink_dcmotor_controller.enable();
+
     // Initialize CAN manager and GM6020 motors
     can_manager.init(&hcan1);
     can_manager.start();
@@ -107,6 +164,7 @@ void loop() {
             
             mavlink_controller.processReceivedByte(byte);
             mavlink_robomaster_controller.processReceivedByte(byte);
+            mavlink_dcmotor_controller.processReceivedByte(byte);
         } else {
             break; // Buffer is empty
         }
@@ -115,6 +173,7 @@ void loop() {
     // Update MAVLink controllers
     mavlink_controller.update();
     mavlink_robomaster_controller.update();
+    mavlink_dcmotor_controller.update();
     
     // Update CAN manager (this also updates all registered motors)
     can_manager.update();

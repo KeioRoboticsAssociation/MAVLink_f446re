@@ -67,7 +67,7 @@ void MAVLinkRoboMasterController::update() {
 }
 
 void MAVLinkRoboMasterController::processReceivedByte(uint8_t byte) {
-    if (mavlink_parse_char(MAVLINK_COMM_0, byte, &rx_msg_, &rx_status_)) {
+    if (mavlink_parse_char(MAVLINK_COMM_1, byte, &rx_msg_, &rx_status_)) {
         handleMessage(&rx_msg_);
     }
 }

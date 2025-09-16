@@ -1,9 +1,9 @@
 {
   "encoder": {
-    "cpr": 1024,
+    "cpr": 4096,
     "invertA": false,
     "invertB": false,
-    "useZ": true,
+    "useZ": false,
     "mode": "TIM_ENCODER_MODE",
     "watchdogTimeoutMs": 500,
     "offsetCounts": 0,

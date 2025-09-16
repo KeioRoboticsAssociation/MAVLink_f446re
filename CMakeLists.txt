@@ -12,7 +12,7 @@ set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS ON)
 
-set(CMAKE CXX STANDARD 20)
+set(CMAKE_CXX_STANDARD 20)
 
 # Suppress common MAVLink warnings for cleaner builds
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused-parameter -Wno-address-of-packed-member -Wno-pedantic")
