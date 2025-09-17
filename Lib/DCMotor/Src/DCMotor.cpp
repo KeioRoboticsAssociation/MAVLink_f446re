@@ -40,11 +40,11 @@ void DCMotor::setDuty(float duty) {
     current_duty_ = duty;
 
     if (duty > 0){
-        value = (uint16_t)(pwm_resolution * (1.0f-duty));
-        setDirection(1);
-    }else{
-        value = (uint16_t)(pwm_resolution * (1.0f+duty));
+        value = (uint16_t)(pwm_resolution * (duty));
         setDirection(0);
+    }else{
+        value = (uint16_t)(pwm_resolution * (-duty));
+        setDirection(1);
     }
     __HAL_TIM_SET_COMPARE(htim, channel, value);
 }

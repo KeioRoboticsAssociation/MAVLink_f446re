@@ -434,7 +434,7 @@ void RoboMasterMotor::processCANData(const uint8_t* data, uint8_t length) {
         last_raw_position_ = current_raw_position;
         absolute_position_rad_ = 0.0f;  // Start at zero
         position_wraps_ = 0;
-        setInitialPosition(65.0*M_PI/180.0);
+        setInitialPosition(1.11903906f);
     } else {
         // Improved wrap detection with hysteresis
         float position_delta = current_raw_position - last_raw_position_;

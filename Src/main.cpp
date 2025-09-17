@@ -40,15 +40,16 @@ Encoder encoder_dcmotor;
 ServoMotor servo1;
 ServoMotor servo2;
 ServoMotor servo3;
+ServoMotor servo4;
 
 // DC Motor instances
 DCMotor dcmotor1(&htim3, TIM_CHANNEL_1, GPIOB, GPIO_PIN_8, true, 1000);
 
 // RoboMaster CAN manager and GM6020 motor instances
-RoboMasterCANManager can_manager;
-RoboMasterMotor gm6020_1;
-// RoboMasterMotor gm6020_2;
-RoboMasterConfig motor_config;
+// RoboMasterCANManager can_manager;
+// RoboMasterMotor gm6020_1;
+// // RoboMasterMotor gm6020_2;
+// RoboMasterConfig motor_config;
 
 
 void setup() {
@@ -72,6 +73,12 @@ void setup() {
     servo3.setEnabled(true);
     servo3.setAngleDeg(0);
 
+    servo4.create(4, &htim12, TIM_CHANNEL_2);
+    servo4.init();
+    servo4.setEnabled(true);
+    servo4.setAngleDeg(0);
+
+
     // Initialize DC Motor
     dcmotor1.setMotorId(10);  // Motor ID 10 for MAVLink
     dcmotor1.start();
@@ -92,7 +99,7 @@ void setup() {
     dc_motor_config.speed_max_output = 1.0f;
 
     // Position control PID (outer loop)
-    dc_motor_config.position_kp = 3.0f;
+    dc_motor_config.position_kp = 1.0f;
     dc_motor_config.position_ki = 0.0f;
     dc_motor_config.position_kd = 0.0f;
     dc_motor_config.position_max_integral = 100.0f;
@@ -110,18 +117,20 @@ void setup() {
     dc_motor_config.control_period_ms = 10;      // 100Hz control
 
     mavlink_dcmotor_controller.setConfig(dc_motor_config);
+    mavlink_dcmotor_controller.setMode(MotorControlMode::POSITION_CONTROL);
+    mavlink_dcmotor_controller.setTargetPosition(0.0f);
     mavlink_dcmotor_controller.enable();
 
     // Initialize CAN manager and GM6020 motors
-    can_manager.init(&hcan1);
-    can_manager.start();
+    // can_manager.init(&hcan1);
+    // can_manager.start();
     
-    gm6020_1.create(5, &can_manager);
-    gm6020_1.init(motor_config);
-    gm6020_1.setControlMode(RoboMasterControlMode::POSITION);
-    gm6020_1.setEnabled(true);
-    gm6020_1.setInitialPosition(30.0*M_PI/180.0);
-    gm6020_1.setPositionRad(0.0f);
+    // gm6020_1.create(5, &can_manager);
+    // gm6020_1.init(motor_config);
+    // gm6020_1.setControlMode(RoboMasterControlMode::POSITION);
+    // gm6020_1.setEnabled(true);
+    // gm6020_1.setInitialPosition(30.0*M_PI/180.0);
+    // gm6020_1.setPositionRad(0.0f);
     
     // gm6020_2.create(6, &can_manager);
     // gm6020_2.init();
@@ -134,9 +143,9 @@ void setup() {
     mavlink_controller.addServo(&servo3);
     
     // Initialize MAVLink RoboMaster controller
-    mavlink_robomaster_controller.init(&huart2, 1);  // UART2, System ID 1
-    mavlink_robomaster_controller.setCANManager(&can_manager);
-    mavlink_robomaster_controller.addMotor(&gm6020_1, 5);
+    // mavlink_robomaster_controller.init(&huart2, 1);  // UART2, System ID 1
+    // mavlink_robomaster_controller.setCANManager(&can_manager);
+    // mavlink_robomaster_controller.addMotor(&gm6020_1, 5);
     // mavlink_robomaster_controller.addMotor(&gm6020_2, 6);
     
     // Enable UART receive interrupt
@@ -163,7 +172,7 @@ void loop() {
             __enable_irq();
             
             mavlink_controller.processReceivedByte(byte);
-            mavlink_robomaster_controller.processReceivedByte(byte);
+            // mavlink_robomaster_controller.processReceivedByte(byte);
             mavlink_dcmotor_controller.processReceivedByte(byte);
         } else {
             break; // Buffer is empty
@@ -172,11 +181,11 @@ void loop() {
     
     // Update MAVLink controllers
     mavlink_controller.update();
-    mavlink_robomaster_controller.update();
+    // mavlink_robomaster_controller.update();
     mavlink_dcmotor_controller.update();
     
     // Update CAN manager (this also updates all registered motors)
-    can_manager.update();
+    // can_manager.update();
     
     // Short delay to prevent tight loop
     HAL_Delay(10);
@@ -200,8 +209,8 @@ extern "C" void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
     }
 }
 
-extern "C" void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan) {
-    if (hcan->Instance == CAN1) {
-        can_manager.handleCANReceive();
-    }
-}
+// extern "C" void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan) {
+//     if (hcan->Instance == CAN1) {
+//         can_manager.handleCANReceive();
+//     }
+// }

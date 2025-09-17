@@ -29,7 +29,7 @@ enum class RoboMasterFailSafeBehavior {
 
 struct RoboMasterConfig {
     // Physical limits
-    float maxVelocityRPS = 100.0f;           // Max velocity in RPS
+    float maxVelocityRPS = 10.0f;           // Max velocity in RPS
     float maxAccelerationRPS2 = 200.0f;     // Max acceleration in RPS^2
     int16_t maxCurrent = 25000;              // Max current in mA
     int16_t minCurrent = -25000;             // Min current in mA

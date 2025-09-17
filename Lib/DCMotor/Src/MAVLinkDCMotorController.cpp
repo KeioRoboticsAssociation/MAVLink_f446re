@@ -168,10 +168,10 @@ void MAVLinkDCMotorController::update() {
     updateVelocityEstimate();
 
     // Check watchdog
-    if (!checkWatchdog()) {
-        handleTimeout();
-        return;
-    }
+    // if (!checkWatchdog()) {
+    //     handleTimeout();
+    //     return;
+    // }
 
     // Run control loop at specified rate
     if (current_time - last_control_update_ >= config_.control_period_ms) {
