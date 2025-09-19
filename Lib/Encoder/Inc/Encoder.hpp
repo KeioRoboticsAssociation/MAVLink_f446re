@@ -66,7 +66,7 @@ public:
     EncoderStatus loadConfigFromFileForId(const char* filePath);
     EncoderStatus saveConfigToFile(const char* filePath) const;
 
-    int32_t getPosition() const { return state_.currentPosition; }
+    int32_t getPosition() const { return state_.rawPosition + config_.offsetCounts; }
     int32_t getRawPosition() const { return state_.rawPosition; }
     float getAngleRad() const { return state_.currentAngleRad; }
     float getAngleDeg() const { return state_.currentAngleDeg; }

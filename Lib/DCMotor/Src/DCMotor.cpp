@@ -1,10 +1,9 @@
 #include "DCMotor.hpp"
 
-DCMotor::DCMotor(TIM_HandleTypeDef *htim, uint16_t channel, GPIO_TypeDef* GPIO_Port, uint16_t GPIO_Pin, bool direction, uint16_t pwm_resolution) {
+DCMotor::DCMotor(TIM_HandleTypeDef *htim, uint16_t channel, GPIO_TypeDef* GPIO_Port, uint16_t GPIO_Pin, bool direction) {
     this->htim = htim;
     this->channel = channel;
     this->direction = direction;
-    this->pwm_resolution = pwm_resolution;
     this->GPIO_Port = GPIO_Port;
     this->GPIO_Pin = GPIO_Pin;
 
@@ -39,12 +38,15 @@ void DCMotor::setDuty(float duty) {
 
     current_duty_ = duty;
 
+    // Use timer period as PWM resolution
+    uint16_t pwm_period = htim->Init.Period;
+
     if (duty > 0){
-        value = (uint16_t)(pwm_resolution * (duty));
-        setDirection(0);
-    }else{
-        value = (uint16_t)(pwm_resolution * (-duty));
+        value = (uint16_t)(pwm_period * (duty));
         setDirection(1);
+    }else{
+        value = (uint16_t)(pwm_period * (-duty));
+        setDirection(0);
     }
     __HAL_TIM_SET_COMPARE(htim, channel, value);
 }

@@ -259,7 +259,8 @@ void Encoder::updatePosition() {
 }
 
 void Encoder::updateAngles() {
-    float angleRad = (2.0f * M_PI * static_cast<float>(state_.currentPosition)) / static_cast<float>(config_.cpr);
+    // Use cumulative raw position for unlimited rotation tracking
+    float angleRad = (2.0f * M_PI * static_cast<float>(state_.rawPosition + config_.offsetCounts)) / static_cast<float>(config_.cpr);
     state_.currentAngleRad = angleRad;
     state_.currentAngleDeg = angleRad * 180.0f / M_PI;
 }
@@ -276,9 +277,9 @@ void Encoder::handleWrapAround(int32_t& position) {
 }
 
 void Encoder::detectRevolutions() {
-    if (!config_.wrapAround) {
-        state_.revolutions = static_cast<uint32_t>(state_.currentPosition / static_cast<int32_t>(config_.cpr));
-    }
+    // AMT absolute encoders don't need revolution tracking - they provide absolute position within one revolution
+    // Revolution count is maintained for compatibility but not used in angle calculation
+    state_.revolutions = 0;
 }
 
 uint32_t Encoder::getCurrentTimeMs() const {

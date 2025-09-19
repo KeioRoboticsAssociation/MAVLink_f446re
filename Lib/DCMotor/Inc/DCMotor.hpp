@@ -11,7 +11,7 @@ extern "C" {
 
 class DCMotor {
     public:
-        DCMotor(TIM_HandleTypeDef *htim, uint16_t channel, GPIO_TypeDef* GPIO_Port, uint16_t GPIO_Pin, bool direction, uint16_t pwm_resolution);
+        DCMotor(TIM_HandleTypeDef *htim, uint16_t channel, GPIO_TypeDef* GPIO_Port, uint16_t GPIO_Pin, bool direction);
         void setDuty(float duty);
         void start();
         void stop();
@@ -22,12 +22,12 @@ class DCMotor {
         bool isStarted() const { return started_; }
         uint8_t getMotorId() const { return motor_id_; }
         void setMotorId(uint8_t id) { motor_id_ = id; }
+        uint16_t getPwmResolution() const { return htim->Init.Period; }
 
     private:
         void setDirection(bool direction);
         TIM_HandleTypeDef *htim;
         uint16_t channel;
-        uint16_t pwm_resolution;
         bool direction;
 
         GPIO_TypeDef* GPIO_Port;

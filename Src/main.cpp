@@ -5,6 +5,7 @@
 #include "RoboMasterCANManager.hpp"
 #include "MAVLinkRoboMasterController.hpp"
 #include "Encoder.hpp"
+#include "EncoderConfig.hpp"
 #include "DCMotor.hpp"
 #include "MAVLinkDCMotorController.hpp"
 #include <cmath>
@@ -45,8 +46,8 @@ ServoMotor servo2;
 ServoMotor servo3;
 ServoMotor servo4;
 
-// DC Motor instances
-DCMotor dcmotor1(&htim3, TIM_CHANNEL_1, GPIOB, GPIO_PIN_8, true, 1000);
+// DC Motor instances - PWM resolution automatically determined from timer period
+DCMotor dcmotor1(&htim3, TIM_CHANNEL_1, GPIOB, GPIO_PIN_8, true);
 
 // RoboMaster CAN manager and GM6020 motor instances
 // RoboMasterCANManager can_manager;
@@ -58,7 +59,30 @@ DCMotor dcmotor1(&htim3, TIM_CHANNEL_1, GPIOB, GPIO_PIN_8, true, 1000);
 void setup() {
     // Initialize encoders
     encoder_dcmotor.create(1, &htim1);
-    encoder_dcmotor.init();
+
+    // Load encoder config for cumulative position tracking (embedded JSON - file I/O not available on embedded STM32)
+    const char* encoder_config_json = R"({
+  "encoders": {
+    "1": {
+      "cpr": 8192,
+      "invertA": true,
+      "invertB": false,
+      "useZ": false,
+      "mode": "TIM_ENCODER_MODE",
+      "watchdogTimeoutMs": 500,
+      "offsetCounts": 0,
+      "wrapAround": false
+    }
+  }
+})";
+
+    // Parse config for encoder ID 1
+    EncoderConfig encoder_config;
+    if (EncoderConfigParser::parseFromJsonForId(encoder_config_json, 1, encoder_config) == EncoderStatus::OK) {
+        encoder_dcmotor.init(encoder_config);
+    } else {
+        encoder_dcmotor.init();  // Fallback to default config
+    }
 
     // Initialize servos with configuration from JSON
     servo1.create(1, &htim2, TIM_CHANNEL_1);
@@ -92,17 +116,17 @@ void setup() {
     // Configure DC Motor with reasonable PID parameters
     MotorConfig dc_motor_config;
     dc_motor_config.motor_id = 10;
-    dc_motor_config.mode = MotorControlMode::POSITION_CONTROL;
+    dc_motor_config.mode = MotorControlMode::SPEED_CONTROL;
 
-    // Speed control PID (inner loop)
-    dc_motor_config.speed_kp = 0.8f;
-    dc_motor_config.speed_ki = 0.0f;
-    dc_motor_config.speed_kd = 0.0f;
-    dc_motor_config.speed_max_integral = 10.0f;
-    dc_motor_config.speed_max_output = 1.0f;
+    // Speed control PID (inner loop) - Tuned for smoother operation
+    dc_motor_config.speed_kp = 0.1f;    // Increased for better response
+    dc_motor_config.speed_ki = 0.0f;    // Small integral to eliminate steady-state error
+    dc_motor_config.speed_kd = 0.0f;   // Small derivative for damping
+    dc_motor_config.speed_max_integral = 0.3f;  // Limit integral windup
+    dc_motor_config.speed_max_output = 0.1f;
 
     // Position control PID (outer loop)
-    dc_motor_config.position_kp = 1.0f;
+    dc_motor_config.position_kp = 0.1f;
     dc_motor_config.position_ki = 0.0f;
     dc_motor_config.position_kd = 0.0f;
     dc_motor_config.position_max_integral = 100.0f;
@@ -120,8 +144,8 @@ void setup() {
     dc_motor_config.control_period_ms = 10;      // 100Hz control
 
     mavlink_dcmotor_controller.setConfig(dc_motor_config);
-    mavlink_dcmotor_controller.setMode(MotorControlMode::POSITION_CONTROL);
-    mavlink_dcmotor_controller.setTargetPosition(0.0f);
+    mavlink_dcmotor_controller.setMode(MotorControlMode::SPEED_CONTROL);
+    mavlink_dcmotor_controller.setTargetSpeed(2.0f);  // Higher speed for smoother operation
     mavlink_dcmotor_controller.enable();
 
     // Initialize CAN manager and GM6020 motors
