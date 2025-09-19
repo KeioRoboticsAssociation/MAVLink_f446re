@@ -3,7 +3,9 @@
 MAVLinkDCMotorController::MAVLinkDCMotorController()
     : motor_(nullptr), encoder_(nullptr), uart_(nullptr), system_id_(1), initialized_(false),
       last_telemetry_send_(0), last_control_update_(0), previous_position_rad_(0.0f),
-      previous_position_time_(0), filtered_velocity_rad_s_(0.0f) {
+      previous_position_time_(0), filtered_velocity_rad_s_(0.0f),
+      duty_to_position_target_rad_(0.0f), duty_to_position_duty_(0.0f),
+      duty_to_position_start_time_(0) {
 
     // Initialize MAVLink parsing
     rx_status_ = {};
@@ -218,6 +220,10 @@ void MAVLinkDCMotorController::updateControlLoop() {
             break;
         }
 
+        case MotorControlMode::DUTY_TO_POSITION:
+            updateDutyToPositionControl();
+            return; // updateDutyToPositionControl handles motor setting directly
+
         case MotorControlMode::DISABLED:
         default:
             duty_cycle = 0.0f;
@@ -278,11 +284,11 @@ float MAVLinkDCMotorController::calculatePositionPID(float target_position, floa
 
 void MAVLinkDCMotorController::updateVelocityEstimate() {
     uint32_t current_time = getCurrentTimeMs();
-    float dt = (current_time - previous_position_time_) / 1000.0f;
+    float dt = (float)(current_time - previous_position_time_) / 1000.0f;
 
-    if (dt > 0.001f) { // Minimum 1ms interval
+    if (dt > 0.001f) { // Minimum 100ms interval
         float current_position = state_.current_position_rad;
-        float velocity = wrapAngle(current_position - previous_position_rad_) / dt;
+        float velocity = (current_position - previous_position_rad_) / dt;
 
         // Apply low-pass filter
         filtered_velocity_rad_s_ = VELOCITY_FILTER_ALPHA * filtered_velocity_rad_s_ +
@@ -344,6 +350,10 @@ void MAVLinkDCMotorController::handleMessage(mavlink_message_t* msg) {
             handlePositionTarget(msg);
             break;
 
+        case MAVLINK_MSG_ID_ROBOMASTER_MOTOR_CONTROL:
+            handleRoboMasterMotorControl(msg);
+            break;
+
         // Add more message handlers as needed
         default:
             break;
@@ -382,6 +392,14 @@ void MAVLinkDCMotorController::handleMotorCommand(mavlink_message_t* msg) {
 
         case 31014: // Custom motor duty cycle command
             setTargetDutyCycle(command.param2);
+            break;
+
+        case 31015: // Custom duty-to-position control command
+            // param1 = motor_id (already checked above)
+            // param2 = duty_cycle (-1.0 to 1.0)
+            // param3 = target_angle_rad
+            setDutyToPositionParams(command.param2, command.param3);
+            setMode(MotorControlMode::DUTY_TO_POSITION);
             break;
 
         case 400: // MAV_CMD_COMPONENT_ARM_DISARM
@@ -493,4 +511,91 @@ float MAVLinkDCMotorController::wrapAngle(float angle_rad) {
     while (angle_rad > M_PI) angle_rad -= 2.0f * M_PI;
     while (angle_rad < -M_PI) angle_rad += 2.0f * M_PI;
     return angle_rad;
+}
+
+MotorStatus MAVLinkDCMotorController::setDutyToPositionParams(float duty_cycle, float target_angle_rad) {
+    if (!initialized_) {
+        return MotorStatus::NOT_INITIALIZED;
+    }
+
+    // Validate duty cycle
+    if (duty_cycle < -1.0f || duty_cycle > 1.0f) {
+        return MotorStatus::CONFIG_ERROR;
+    }
+
+    duty_to_position_duty_ = duty_cycle;
+    duty_to_position_target_rad_ = target_angle_rad;
+    duty_to_position_start_time_ = getCurrentTimeMs();
+
+    return MotorStatus::OK;
+}
+
+void MAVLinkDCMotorController::updateDutyToPositionControl() {
+    uint32_t current_time = getCurrentTimeMs();
+
+    // Check timeout
+    if (current_time - duty_to_position_start_time_ > DUTY_TO_POSITION_TIMEOUT_MS) {
+        // Timeout reached, switch to disabled mode
+        setMode(MotorControlMode::DISABLED);
+        motor_->setDuty(0.0f);
+        state_.current_duty_cycle = 0.0f;
+        return;
+    }
+    // Check if target position is reached
+    if (duty_to_position_target_rad_ < POSITION_TOLERANCE_RAD) {
+        // Target reached, switch to disabled mode
+        setMode(MotorControlMode::DISABLED);
+        motor_->setDuty(0.0f);
+        state_.current_duty_cycle = 0.0f;
+    } else {
+        // Continue with specified duty cycle
+        motor_->setDuty(duty_to_position_duty_);
+        state_.current_duty_cycle = duty_to_position_duty_;
+    }
+}
+
+void MAVLinkDCMotorController::handleRoboMasterMotorControl(mavlink_message_t* msg) {
+    mavlink_robomaster_motor_control_t motor_control;
+    mavlink_msg_robomaster_motor_control_decode(msg, &motor_control);
+
+    // Check if message is for this motor
+    if (motor_control.motor_id != state_.motor_id) {
+        return;
+    }
+
+    // Check if motor should be enabled/disabled
+    if (!motor_control.enable) {
+        setMode(MotorControlMode::DISABLED);
+        return;
+    }
+
+    // Set control mode based on the existing message structure
+    // Note: control_mode 0=current, 1=velocity, 2=position in existing structure
+    // We map these to our modes: 0=OPEN_LOOP, 1=SPEED_CONTROL, 2=POSITION_CONTROL
+    switch (motor_control.control_mode) {
+        case 0:  // Current control -> Open loop (duty cycle)
+            // control_value interpreted as duty cycle (-1.0 to 1.0)
+            setTargetDutyCycle(motor_control.control_value);
+            setMode(MotorControlMode::OPEN_LOOP);
+            break;
+
+        case 1:  // Velocity control -> Speed control
+            // control_value interpreted as rad/s
+            setTargetSpeed(motor_control.control_value);
+            setMode(MotorControlMode::SPEED_CONTROL);
+            break;
+
+        case 2:  // Position control -> Position control
+            // control_value interpreted as radians
+            setTargetPosition(motor_control.control_value);
+            setMode(MotorControlMode::POSITION_CONTROL);
+            break;
+
+        default:
+            setMode(MotorControlMode::DISABLED);
+            break;
+    }
+
+    // Update watchdog
+    state_.last_command_time = getCurrentTimeMs();
 }

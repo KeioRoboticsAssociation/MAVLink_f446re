@@ -116,14 +116,14 @@ void setup() {
     // Configure DC Motor with reasonable PID parameters
     MotorConfig dc_motor_config;
     dc_motor_config.motor_id = 10;
-    dc_motor_config.mode = MotorControlMode::SPEED_CONTROL;
+    dc_motor_config.mode = MotorControlMode::DUTY_TO_POSITION;
 
     // Speed control PID (inner loop) - Tuned for smoother operation
     dc_motor_config.speed_kp = 0.1f;    // Increased for better response
-    dc_motor_config.speed_ki = 0.0f;    // Small integral to eliminate steady-state error
+    dc_motor_config.speed_ki = 0.1f;    // Small integral to eliminate steady-state error
     dc_motor_config.speed_kd = 0.0f;   // Small derivative for damping
     dc_motor_config.speed_max_integral = 0.3f;  // Limit integral windup
-    dc_motor_config.speed_max_output = 0.1f;
+    dc_motor_config.speed_max_output = 0.5f;
 
     // Position control PID (outer loop)
     dc_motor_config.position_kp = 0.1f;
@@ -144,8 +144,8 @@ void setup() {
     dc_motor_config.control_period_ms = 10;      // 100Hz control
 
     mavlink_dcmotor_controller.setConfig(dc_motor_config);
-    mavlink_dcmotor_controller.setMode(MotorControlMode::SPEED_CONTROL);
-    mavlink_dcmotor_controller.setTargetSpeed(2.0f);  // Higher speed for smoother operation
+    mavlink_dcmotor_controller.setMode(MotorControlMode::DUTY_TO_POSITION);
+    mavlink_dcmotor_controller.setDutyToPositionParams(0.5f, 47.12f);  // Higher speed for smoother operation
     mavlink_dcmotor_controller.enable();
 
     // Initialize CAN manager and GM6020 motors

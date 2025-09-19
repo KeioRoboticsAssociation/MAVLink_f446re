@@ -3,14 +3,15 @@
 #include "stm32f4xx_hal.h"
 #include "DCMotor.hpp"
 #include "Encoder.hpp"
-#include "../../mavlink/c_library_v2/common/mavlink.h"
+#include "../../mavlink/c_library_v2_robomaster/robomaster/mavlink.h"
 #include <cmath>
 
 enum class MotorControlMode {
     OPEN_LOOP = 0,
     SPEED_CONTROL = 1,
     POSITION_CONTROL = 2,
-    DISABLED = 3
+    DISABLED = 3,
+    DUTY_TO_POSITION = 4  // Apply duty cycle until target position is reached
 };
 
 enum class MotorStatus {
@@ -117,6 +118,9 @@ public:
     // Main update function (call regularly from main loop)
     void update();
 
+    // Duty-to-position control mode
+    MotorStatus setDutyToPositionParams(float duty_cycle, float target_angle_rad);
+
     // MAVLink communication
     void handleMessage(mavlink_message_t* msg);
     void processReceivedByte(uint8_t byte);
@@ -150,8 +154,16 @@ private:
     uint32_t previous_position_time_;
     float filtered_velocity_rad_s_;
 
+    // Duty-to-position control mode
+    float duty_to_position_target_rad_;
+    float duty_to_position_duty_;
+    uint32_t duty_to_position_start_time_;
+    static constexpr uint32_t DUTY_TO_POSITION_TIMEOUT_MS = 10000; // 10 second timeout
+    static constexpr float POSITION_TOLERANCE_RAD = 0.1f; // ~5.7 degrees
+
     // Control algorithms
     void updateControlLoop();
+    void updateDutyToPositionControl();
     float calculateSpeedPID(float target_speed, float current_speed, float dt);
     float calculatePositionPID(float target_position, float current_position, float dt);
     void applyDutyCycleLimit(float& duty_cycle);
@@ -168,6 +180,7 @@ private:
     void handleMotorConfigSet(mavlink_message_t* msg);
     void handleMotorConfigGet(mavlink_message_t* msg);
     void handlePositionTarget(mavlink_message_t* msg);
+    void handleRoboMasterMotorControl(mavlink_message_t* msg);
     void handleSpeedTarget(mavlink_message_t* msg);
 
     // MAVLink message senders

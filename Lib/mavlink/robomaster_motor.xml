@@ -1,0 +1,54 @@
+<?xml version="1.0"?>
+<mavlink>
+    <include>c_library_v2/message_definitions/common.xml</include>
+    <version>3</version>
+    <dialect>0</dialect>
+    <enums>
+        <!-- Motor Control Mode Enum -->
+        <enum name="MOTOR_CONTROL_MODE">
+            <description>Motor control modes for RoboMaster motor controllers</description>
+            <entry value="0" name="MOTOR_CONTROL_MODE_OPEN_LOOP">
+                <description>Open loop PWM control</description>
+            </entry>
+            <entry value="1" name="MOTOR_CONTROL_MODE_SPEED">
+                <description>Closed loop speed control</description>
+            </entry>
+            <entry value="2" name="MOTOR_CONTROL_MODE_POSITION">
+                <description>Closed loop position control</description>
+            </entry>
+            <entry value="3" name="MOTOR_CONTROL_MODE_DISABLED">
+                <description>Motor disabled</description>
+            </entry>
+            <entry value="4" name="MOTOR_CONTROL_MODE_DUTY_TO_POSITION">
+                <description>Apply duty cycle until target position is reached</description>
+            </entry>
+        </enum>
+    </enums>
+    <messages>
+        <!-- Motor Control Command Message -->
+        <message id="12000" name="ROBOMASTER_MOTOR_CONTROL">
+            <description>Control command for RoboMaster motor with duty-to-position capability</description>
+            <field type="uint8_t" name="target_system">System ID</field>
+            <field type="uint8_t" name="target_component">Component ID</field>
+            <field type="uint8_t" name="motor_id">Motor ID (1-255)</field>
+            <field type="uint8_t" name="control_mode">Control mode (see MOTOR_CONTROL_MODE enum)</field>
+            <field type="float" name="duty_cycle">Duty cycle (-1.0 to 1.0), used in DUTY_TO_POSITION mode</field>
+            <field type="float" name="target_position_rad">Target position in radians</field>
+            <field type="float" name="target_speed_rad_s">Target speed in rad/s</field>
+            <field type="uint32_t" name="timeout_ms">Timeout in milliseconds for DUTY_TO_POSITION mode</field>
+        </message>
+
+        <!-- Motor Status Message -->
+        <message id="12001" name="ROBOMASTER_MOTOR_STATUS">
+            <description>Status feedback from RoboMaster motor controller</description>
+            <field type="uint8_t" name="motor_id">Motor ID (1-255)</field>
+            <field type="uint8_t" name="control_mode">Current control mode (see MOTOR_CONTROL_MODE enum)</field>
+            <field type="uint8_t" name="status">Motor status (0=OK, 1=ERROR, 2=TIMEOUT, 3=NOT_INITIALIZED)</field>
+            <field type="float" name="current_position_rad">Current position in radians</field>
+            <field type="float" name="current_speed_rad_s">Current speed in rad/s</field>
+            <field type="float" name="current_duty_cycle">Current duty cycle (-1.0 to 1.0)</field>
+            <field type="float" name="position_error_rad">Position error in radians (target - current)</field>
+            <field type="uint32_t" name="timestamp_ms">Timestamp in milliseconds</field>
+        </message>
+    </messages>
+</mavlink>

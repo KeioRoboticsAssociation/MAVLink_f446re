@@ -1,12 +1,12 @@
 /** @file
- *  @brief MAVLink comm protocol built from common.xml
+ *  @brief MAVLink comm protocol built from robomaster_motor.xml
  *  @see http://mavlink.org
  */
 #pragma once
 #ifndef MAVLINK_H
 #define MAVLINK_H
 
-#define MAVLINK_PRIMARY_XML_HASH -3829543454730504949
+#define MAVLINK_PRIMARY_XML_HASH 5343616835293439225
 
 #ifndef MAVLINK_STX
 #define MAVLINK_STX 253
@@ -29,6 +29,6 @@
 #endif
 
 #include "version.h"
-#include "common.h"
+#include "robomaster_motor.h"
 
 #endif // MAVLINK_H
