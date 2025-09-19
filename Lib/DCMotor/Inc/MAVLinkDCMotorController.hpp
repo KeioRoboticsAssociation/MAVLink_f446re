@@ -30,15 +30,15 @@ struct MotorConfig {
 
     // PID parameters for speed control
     float speed_kp = 1.0f;
-    float speed_ki = 0.1f;
-    float speed_kd = 0.01f;
+    float speed_ki = 0.0f;
+    float speed_kd = 0.0f;
     float speed_max_integral = 100.0f;
     float speed_max_output = 1.0f;
 
     // PID parameters for position control
     float position_kp = 2.0f;
-    float position_ki = 0.05f;
-    float position_kd = 0.1f;
+    float position_ki = 0.0f;
+    float position_kd = 0.0f;
     float position_max_integral = 1000.0f;
     float position_max_output = 10.0f; // rad/s
 
