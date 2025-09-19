@@ -1,5 +1,6 @@
 #include "ServoMotor.hpp"
 #include "ServoConfig.hpp"
+#include <cmath>
 
 ServoMotor::ServoMotor() {
     state_.status = ServoStatus::NOT_INITIALIZED;
@@ -275,19 +276,22 @@ ServoStatus ServoMotor::retrieveTimerInfo() {
 }
 
 float ServoMotor::constrainAngle(float angleDeg) const {
-    float adjustedAngle = angleDeg + config_.offsetDeg;
-    
+    // First constrain the input angle to the valid range
+    float constrainedAngle = angleDeg;
+    if (constrainedAngle < config_.angleMinDeg) {
+        constrainedAngle = config_.angleMinDeg;
+    }
+    if (constrainedAngle > config_.angleMaxDeg) {
+        constrainedAngle = config_.angleMaxDeg;
+    }
+
+    // Then apply offset and direction transformations
+    float adjustedAngle = constrainedAngle + config_.offsetDeg;
+
     if (config_.directionInverted) {
         adjustedAngle = -adjustedAngle;
     }
-    
-    if (adjustedAngle < config_.angleMinDeg) {
-        return config_.angleMinDeg;
-    }
-    if (adjustedAngle > config_.angleMaxDeg) {
-        return config_.angleMaxDeg;
-    }
-    
+
     return adjustedAngle;
 }
 

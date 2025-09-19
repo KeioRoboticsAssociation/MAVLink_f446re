@@ -3,11 +3,11 @@
 #include <cstdio>
 
 const ServoConfig ServoConfigDefaults::STANDARD_SERVO = {
-    .angleMinDeg = -90.0f,
-    .angleMaxDeg = 90.0f,
-    .pulseMinUs = 1000,
+    .angleMinDeg = -180.0f,
+    .angleMaxDeg = 180.0f,
+    .pulseMinUs = 0,
     .pulseMaxUs = 2000,
-    .pulseNeutralUs = 1500,
+    .pulseNeutralUs = 1000,
     .directionInverted = false,
     .offsetDeg = 0.0f,
     .maxVelocityDegPerS = 180.0f,
@@ -19,11 +19,11 @@ const ServoConfig ServoConfigDefaults::STANDARD_SERVO = {
 };
 
 const ServoConfig ServoConfigDefaults::HIGH_TORQUE_SERVO = {
-    .angleMinDeg = -90.0f,
-    .angleMaxDeg = 90.0f,
-    .pulseMinUs = 500,
-    .pulseMaxUs = 2500,
-    .pulseNeutralUs = 1500,
+    .angleMinDeg = -180.0f,
+    .angleMaxDeg = 180.0f,
+    .pulseMinUs = 0,
+    .pulseMaxUs = 2000,
+    .pulseNeutralUs = 1000,
     .directionInverted = false,
     .offsetDeg = 0.0f,
     .maxVelocityDegPerS = 120.0f,
@@ -37,9 +37,9 @@ const ServoConfig ServoConfigDefaults::HIGH_TORQUE_SERVO = {
 const ServoConfig ServoConfigDefaults::CONTINUOUS_ROTATION_SERVO = {
     .angleMinDeg = -180.0f,
     .angleMaxDeg = 180.0f,
-    .pulseMinUs = 1000,
+    .pulseMinUs = 0,
     .pulseMaxUs = 2000,
-    .pulseNeutralUs = 1500,
+    .pulseNeutralUs = 1000,
     .directionInverted = false,
     .offsetDeg = 0.0f,
     .maxVelocityDegPerS = 360.0f,
@@ -51,11 +51,11 @@ const ServoConfig ServoConfigDefaults::CONTINUOUS_ROTATION_SERVO = {
 };
 
 const ServoConfig ServoConfigDefaults::DIGITAL_SERVO = {
-    .angleMinDeg = -90.0f,
-    .angleMaxDeg = 90.0f,
-    .pulseMinUs = 600,
-    .pulseMaxUs = 2400,
-    .pulseNeutralUs = 1500,
+    .angleMinDeg = -180.0f,
+    .angleMaxDeg = 180.0f,
+    .pulseMinUs = 0,
+    .pulseMaxUs = 2000,
+    .pulseNeutralUs = 1000,
     .directionInverted = false,
     .offsetDeg = 0.0f,
     .maxVelocityDegPerS = 300.0f,
@@ -109,17 +109,21 @@ ServoStatus ServoConfigParser::parseFromJsonForId(const char* jsonString, uint8_
 
     config = ServoConfigDefaults::STANDARD_SERVO;
 
-    parseFloat(servoSection, "initial_offset", config.offsetDeg);
-    parseFloat(servoSection, "min_angle", config.angleMinDeg);
-    parseFloat(servoSection, "max_angle", config.angleMaxDeg);
-    
-    parseFloat(servoSection, "angleMinDeg", config.angleMinDeg);
-    parseFloat(servoSection, "angleMaxDeg", config.angleMaxDeg);
+    // Try legacy field names first, then standard names
+    if (!parseFloat(servoSection, "initial_offset", config.offsetDeg)) {
+        parseFloat(servoSection, "offsetDeg", config.offsetDeg);
+    }
+    if (!parseFloat(servoSection, "min_angle", config.angleMinDeg)) {
+        parseFloat(servoSection, "angleMinDeg", config.angleMinDeg);
+    }
+    if (!parseFloat(servoSection, "max_angle", config.angleMaxDeg)) {
+        parseFloat(servoSection, "angleMaxDeg", config.angleMaxDeg);
+    }
+
     parseUint16(servoSection, "pulseMinUs", config.pulseMinUs);
     parseUint16(servoSection, "pulseMaxUs", config.pulseMaxUs);
     parseUint16(servoSection, "pulseNeutralUs", config.pulseNeutralUs);
     parseBool(servoSection, "directionInverted", config.directionInverted);
-    parseFloat(servoSection, "offsetDeg", config.offsetDeg);
     parseFloat(servoSection, "maxVelocityDegPerS", config.maxVelocityDegPerS);
     parseFloat(servoSection, "maxAccelerationDegPerS2", config.maxAccelerationDegPerS2);
     parseUint32(servoSection, "watchdogTimeoutMs", config.watchdogTimeoutMs);
@@ -229,7 +233,7 @@ ServoStatus ServoConfigParser::saveToFile(const char* filePath, const ServoConfi
     fprintf(file, "  \"offsetDeg\": %.2f,\n", config.offsetDeg);
     fprintf(file, "  \"maxVelocityDegPerS\": %.2f,\n", config.maxVelocityDegPerS);
     fprintf(file, "  \"maxAccelerationDegPerS2\": %.2f,\n", config.maxAccelerationDegPerS2);
-    fprintf(file, "  \"watchdogTimeoutMs\": %u,\n", config.watchdogTimeoutMs);
+    fprintf(file, "  \"watchdogTimeoutMs\": %lu,\n", (unsigned long)config.watchdogTimeoutMs);
     
     const char* failSafeBehaviorStr = "\"NEUTRAL_POSITION\"";
     switch (config.failSafeBehavior) {

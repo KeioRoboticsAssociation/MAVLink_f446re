@@ -36,6 +36,9 @@ static volatile uint16_t uart_rx_tail = 0;
 // Encoders
 Encoder encoder_dcmotor;
 
+// Limit switch state tracking
+uint8_t limitSwitchState = 0;
+
 // Servo instances
 ServoMotor servo1;
 ServoMotor servo2;
@@ -57,26 +60,26 @@ void setup() {
     encoder_dcmotor.create(1, &htim1);
     encoder_dcmotor.init();
 
-    // Initialize servos
+    // Initialize servos with configuration from JSON
     servo1.create(1, &htim2, TIM_CHANNEL_1);
+    servo1.loadConfigFromFileForId("Lib/ServoMotor/Inc/servo_config.json");
     servo1.init();
     servo1.setEnabled(true);
-    servo1.setAngleDeg(0);
-    
+
     servo2.create(2, &htim2, TIM_CHANNEL_2);
+    servo2.loadConfigFromFileForId("Lib/ServoMotor/Inc/servo_config.json");
     servo2.init();
     servo2.setEnabled(true);
-    servo2.setAngleDeg(0);
-    
+
     servo3.create(3, &htim12, TIM_CHANNEL_1);
+    servo3.loadConfigFromFileForId("Lib/ServoMotor/Inc/servo_config.json");
     servo3.init();
     servo3.setEnabled(true);
-    servo3.setAngleDeg(0);
 
     servo4.create(4, &htim12, TIM_CHANNEL_2);
+    servo4.loadConfigFromFileForId("Lib/ServoMotor/Inc/servo_config.json");
     servo4.init();
     servo4.setEnabled(true);
-    servo4.setAngleDeg(0);
 
 
     // Initialize DC Motor
@@ -141,6 +144,7 @@ void setup() {
     mavlink_controller.addServo(&servo1);
     mavlink_controller.addServo(&servo2);
     mavlink_controller.addServo(&servo3);
+    mavlink_controller.addServo(&servo4);
     
     // Initialize MAVLink RoboMaster controller
     // mavlink_robomaster_controller.init(&huart2, 1);  // UART2, System ID 1
@@ -186,7 +190,24 @@ void loop() {
     
     // Update CAN manager (this also updates all registered motors)
     // can_manager.update();
-    
+    if (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_0) == GPIO_PIN_RESET) {
+        if (limitSwitchState == 0) {
+            limitSwitchState = 1;
+            // Reset encoder position to zero (origin)
+            encoder_dcmotor.setZeroPosition();
+            // Reset MAVLink controller target position to zero
+            mavlink_dcmotor_controller.setTargetPosition(0.0f);
+            // Stop the motor briefly for safety
+            dcmotor1.brake();
+            HAL_Delay(10);  // Brief delay to ensure motor stops
+            dcmotor1.start();
+            // Toggle LED to indicate limit switch activation
+            HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_5);
+        }
+    } else {
+        limitSwitchState = 0;
+    }
+
     // Short delay to prevent tight loop
     HAL_Delay(10);
 }

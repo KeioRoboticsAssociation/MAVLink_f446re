@@ -20,11 +20,11 @@ enum class FailSafeBehavior {
 };
 
 struct ServoConfig {
-    float angleMinDeg = -90.0f;
-    float angleMaxDeg = 90.0f;
-    uint16_t pulseMinUs = 1000;
+    float angleMinDeg = -180.0f;
+    float angleMaxDeg = 180.0f;
+    uint16_t pulseMinUs = 0;
     uint16_t pulseMaxUs = 2000;
-    uint16_t pulseNeutralUs = 1500;
+    uint16_t pulseNeutralUs = 1000;
     bool directionInverted = false;
     float offsetDeg = 0.0f;
     float maxVelocityDegPerS = 180.0f;
