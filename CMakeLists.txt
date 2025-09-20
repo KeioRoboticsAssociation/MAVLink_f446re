@@ -50,20 +50,47 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user defined library search paths
 )
 
-# Add sources to executable
+# Create motor core library for shared interfaces
+add_library(motor_core INTERFACE)
+target_compile_features(motor_core INTERFACE cxx_std_20)
+target_compile_definitions(motor_core INTERFACE
+    USE_COMPILE_TIME_CONFIG
+    MOTOR_COUNT=6
+    $<$<CONFIG:Debug>:DEBUG>
+    $<$<CONFIG:Debug>:ENABLE_DEBUG_LOGGING>
+    $<$<CONFIG:Debug>:ENABLE_ASSERTIONS>
+)
+
+# Add new architecture sources
+file(GLOB_RECURSE APP_SOURCES App/*.cpp App/*.c)
 file(GLOB_RECURSE USER_SOURCES Src/*.c Src/*.cpp)
 file(GLOB_RECURSE USER_LIB_SOURCES Lib/*/Src/*.c Lib/*/Src/*.cpp)
+
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
-    # Add user sources here
+    # New architecture sources
+    ${APP_SOURCES}
+    # Legacy sources (will be gradually removed)
     ${USER_SOURCES}
     ${USER_LIB_SOURCES}
 )
 
-# Add include paths
+# Add include paths for new architecture
+target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
+    # New architecture includes
+    App
+    App/config
+    App/hal
+    App/motors
+    App/comm
+    App/safety
+    # Legacy includes
+    Inc
+    Lib
+)
+
+# Add legacy library include directories
 file(GLOB USER_LIB_DIRS Lib/*/Inc)
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
-    # Add user defined include paths
-    Inc
     ${USER_LIB_DIRS}
 )
 
@@ -75,5 +102,6 @@ target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE
 # Add linked libraries
 target_link_libraries(${CMAKE_PROJECT_NAME}
     stm32cubemx
+    motor_core
     # Add user defined libraries
 )
