@@ -158,6 +158,8 @@ private:
     float duty_to_position_target_rad_;
     float duty_to_position_duty_;
     uint32_t duty_to_position_start_time_;
+    float duty_to_position_start_rad_;
+    int duty_to_position_direction_; // 1 for positive direction, -1 for negative
     static constexpr uint32_t DUTY_TO_POSITION_TIMEOUT_MS = 10000; // 10 second timeout
     static constexpr float POSITION_TOLERANCE_RAD = 0.1f; // ~5.7 degrees
 

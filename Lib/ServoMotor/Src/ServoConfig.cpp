@@ -3,15 +3,15 @@
 #include <cstdio>
 
 const ServoConfig ServoConfigDefaults::STANDARD_SERVO = {
-    .angleMinDeg = -180.0f,
-    .angleMaxDeg = 180.0f,
-    .pulseMinUs = 0,
+    .angleMinDeg = -60.0f,
+    .angleMaxDeg = 60.0f,
+    .pulseMinUs = 500,
     .pulseMaxUs = 2000,
-    .pulseNeutralUs = 1000,
+    .pulseNeutralUs = 1250,
     .directionInverted = false,
     .offsetDeg = 0.0f,
-    .maxVelocityDegPerS = 180.0f,
-    .maxAccelerationDegPerS2 = 360.0f,
+    .maxVelocityDegPerS = 120.0f,
+    .maxAccelerationDegPerS2 = 240.0f,
     .watchdogTimeoutMs = 500,
     .failSafeBehavior = FailSafeBehavior::NEUTRAL_POSITION,
     .startupAngleDeg = 0.0f,
@@ -19,11 +19,11 @@ const ServoConfig ServoConfigDefaults::STANDARD_SERVO = {
 };
 
 const ServoConfig ServoConfigDefaults::HIGH_TORQUE_SERVO = {
-    .angleMinDeg = -180.0f,
-    .angleMaxDeg = 180.0f,
-    .pulseMinUs = 0,
+    .angleMinDeg = -60.0f,
+    .angleMaxDeg = 60.0f,
+    .pulseMinUs = 500,
     .pulseMaxUs = 2000,
-    .pulseNeutralUs = 1000,
+    .pulseNeutralUs = 1250,
     .directionInverted = false,
     .offsetDeg = 0.0f,
     .maxVelocityDegPerS = 120.0f,
@@ -35,11 +35,11 @@ const ServoConfig ServoConfigDefaults::HIGH_TORQUE_SERVO = {
 };
 
 const ServoConfig ServoConfigDefaults::CONTINUOUS_ROTATION_SERVO = {
-    .angleMinDeg = -180.0f,
-    .angleMaxDeg = 180.0f,
-    .pulseMinUs = 0,
+    .angleMinDeg = -60.0f,
+    .angleMaxDeg = 60.0f,
+    .pulseMinUs = 500,
     .pulseMaxUs = 2000,
-    .pulseNeutralUs = 1000,
+    .pulseNeutralUs = 1250,
     .directionInverted = false,
     .offsetDeg = 0.0f,
     .maxVelocityDegPerS = 360.0f,
@@ -51,11 +51,11 @@ const ServoConfig ServoConfigDefaults::CONTINUOUS_ROTATION_SERVO = {
 };
 
 const ServoConfig ServoConfigDefaults::DIGITAL_SERVO = {
-    .angleMinDeg = -180.0f,
-    .angleMaxDeg = 180.0f,
-    .pulseMinUs = 0,
+    .angleMinDeg = -60.0f,
+    .angleMaxDeg = 60.0f,
+    .pulseMinUs = 500,
     .pulseMaxUs = 2000,
-    .pulseNeutralUs = 1000,
+    .pulseNeutralUs = 1250,
     .directionInverted = false,
     .offsetDeg = 0.0f,
     .maxVelocityDegPerS = 300.0f,

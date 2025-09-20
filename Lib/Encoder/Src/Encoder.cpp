@@ -260,7 +260,7 @@ void Encoder::updatePosition() {
 
 void Encoder::updateAngles() {
     // Use cumulative raw position for unlimited rotation tracking
-    float angleRad = (2.0f * M_PI * static_cast<float>(state_.rawPosition + config_.offsetCounts)) / static_cast<float>(config_.cpr);
+    float angleRad = (2.0f * M_PI * static_cast<float>(state_.rawPosition + config_.offsetCounts)) / (static_cast<float>(config_.cpr)*4.8f);
     state_.currentAngleRad = angleRad;
     state_.currentAngleDeg = angleRad * 180.0f / M_PI;
 }

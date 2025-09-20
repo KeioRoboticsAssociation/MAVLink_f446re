@@ -363,7 +363,7 @@ void ServoMotor::updatePWM(uint16_t pulseUs) {
     if (htim_ == nullptr) {
         return;
     }
-    
+
     uint32_t ccr = pulseToTicks(pulseUs);
     __HAL_TIM_SET_COMPARE(htim_, channel_, ccr);
 }

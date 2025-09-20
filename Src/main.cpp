@@ -144,8 +144,7 @@ void setup() {
     dc_motor_config.control_period_ms = 10;      // 100Hz control
 
     mavlink_dcmotor_controller.setConfig(dc_motor_config);
-    mavlink_dcmotor_controller.setMode(MotorControlMode::DUTY_TO_POSITION);
-    mavlink_dcmotor_controller.setDutyToPositionParams(0.5f, 47.12f);  // Higher speed for smoother operation
+    mavlink_dcmotor_controller.setMode(MotorControlMode::DISABLED);
     mavlink_dcmotor_controller.enable();
 
     // Initialize CAN manager and GM6020 motors

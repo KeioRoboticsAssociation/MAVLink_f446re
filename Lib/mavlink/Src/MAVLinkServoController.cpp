@@ -101,8 +101,8 @@ void MAVLinkServoController::sendServoOutputRaw() {
     for (uint8_t i = 0; i < servo_count_ && i < 16; i++) {
         if (servos_[i] != nullptr && servos_[i]->getStatus() == ServoStatus::OK) {
             uint16_t pulse = servos_[i]->getPulseUs();
-            // Ensure pulse is within valid MAVLink range (0-65535, typically 1000-2000)
-            servo_values[i] = (pulse >= 500 && pulse <= 2500) ? pulse : 0;
+            // Ensure pulse is within valid MAVLink range (0-65535, typically 500-2000)
+            servo_values[i] = (pulse >= 500 && pulse <= 2000) ? pulse : 0;
         } else {
             servo_values[i] = 0;  // Invalid/disconnected servo
         }
@@ -153,28 +153,28 @@ void MAVLinkServoController::handleManualControl(mavlink_message_t* msg) {
         return;
     }
     
-    // Convert MAVLink control inputs (-1000 to +1000) to servo angles (-90 to +90 degrees)
+    // Convert MAVLink control inputs (-1000 to +1000) to servo angles (-60 to +60 degrees)
     // Map to first 4 servos: X, Y, Z, R axes
     if (servo_count_ > 0 && servos_[0] != nullptr) {
-        float angle = (manual_control.x / 1000.0f) * 90.0f;
+        float angle = (manual_control.x / 1000.0f) * 60.0f;
         servos_[0]->setAngleDeg(angle);
         servos_[0]->resetWatchdog();
     }
-    
+
     if (servo_count_ > 1 && servos_[1] != nullptr) {
-        float angle = (manual_control.y / 1000.0f) * 90.0f;
+        float angle = (manual_control.y / 1000.0f) * 60.0f;
         servos_[1]->setAngleDeg(angle);
         servos_[1]->resetWatchdog();
     }
-    
+
     if (servo_count_ > 2 && servos_[2] != nullptr) {
-        float angle = (manual_control.z / 1000.0f) * 90.0f;
+        float angle = (manual_control.z / 1000.0f) * 60.0f;
         servos_[2]->setAngleDeg(angle);
         servos_[2]->resetWatchdog();
     }
-    
+
     if (servo_count_ > 3 && servos_[3] != nullptr) {
-        float angle = (manual_control.r / 1000.0f) * 90.0f;
+        float angle = (manual_control.r / 1000.0f) * 60.0f;
         servos_[3]->setAngleDeg(angle);
         servos_[3]->resetWatchdog();
     }
@@ -196,10 +196,10 @@ void MAVLinkServoController::handleRcChannelsOverride(mavlink_message_t* msg) {
     };
     
     for (uint8_t i = 0; i < 8 && i < servo_count_; i++) {
-        if (servos_[i] != nullptr && channels[i] != UINT16_MAX && 
-            channels[i] >= 1000 && channels[i] <= 2000) {
-            // Convert PWM (1000-2000us) to angle (-90 to +90 degrees)
-            float angle = ((float)(channels[i] - 1500) / 500.0f) * 90.0f;
+        if (servos_[i] != nullptr && channels[i] != UINT16_MAX &&
+            channels[i] >= 500 && channels[i] <= 2000) {
+            // Convert PWM (500-2000us) to angle (-60 to +60 degrees)
+            float angle = ((float)(channels[i] - 1250) / 750.0f) * 60.0f;
             servos_[i]->setAngleDeg(angle);
             servos_[i]->resetWatchdog();
         }

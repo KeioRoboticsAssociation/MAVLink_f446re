@@ -5,7 +5,8 @@ MAVLinkDCMotorController::MAVLinkDCMotorController()
       last_telemetry_send_(0), last_control_update_(0), previous_position_rad_(0.0f),
       previous_position_time_(0), filtered_velocity_rad_s_(0.0f),
       duty_to_position_target_rad_(0.0f), duty_to_position_duty_(0.0f),
-      duty_to_position_start_time_(0) {
+      duty_to_position_start_time_(0), duty_to_position_start_rad_(0.0f),
+      duty_to_position_direction_(0) {
 
     // Initialize MAVLink parsing
     rx_status_ = {};
@@ -526,6 +527,11 @@ MotorStatus MAVLinkDCMotorController::setDutyToPositionParams(float duty_cycle, 
     duty_to_position_duty_ = duty_cycle;
     duty_to_position_target_rad_ = target_angle_rad;
     duty_to_position_start_time_ = getCurrentTimeMs();
+    duty_to_position_start_rad_ = state_.current_position_rad;
+
+    // Calculate direction based on start and target positions
+    float position_diff = target_angle_rad - state_.current_position_rad;
+    duty_to_position_direction_ = (position_diff >= 0) ? 1 : -1;
 
     return MotorStatus::OK;
 }
@@ -541,8 +547,18 @@ void MAVLinkDCMotorController::updateDutyToPositionControl() {
         state_.current_duty_cycle = 0.0f;
         return;
     }
-    // Check if target position is reached
-    if (duty_to_position_target_rad_ < POSITION_TOLERANCE_RAD) {
+    // Check if target position is reached based on direction
+    bool target_reached = false;
+
+    if (duty_to_position_direction_ > 0) {
+        // Moving in positive direction: stop when current >= target
+        target_reached = (state_.current_position_rad >= duty_to_position_target_rad_);
+    } else {
+        // Moving in negative direction: stop when current <= target
+        target_reached = (state_.current_position_rad <= duty_to_position_target_rad_);
+    }
+
+    if (target_reached) {
         // Target reached, switch to disabled mode
         setMode(MotorControlMode::DISABLED);
         motor_->setDuty(0.0f);

@@ -20,15 +20,15 @@ enum class FailSafeBehavior {
 };
 
 struct ServoConfig {
-    float angleMinDeg = -180.0f;
-    float angleMaxDeg = 180.0f;
-    uint16_t pulseMinUs = 0;
+    float angleMinDeg = -60.0f;
+    float angleMaxDeg = 60.0f;
+    uint16_t pulseMinUs = 500;
     uint16_t pulseMaxUs = 2000;
-    uint16_t pulseNeutralUs = 1000;
+    uint16_t pulseNeutralUs = 1250;
     bool directionInverted = false;
     float offsetDeg = 0.0f;
-    float maxVelocityDegPerS = 180.0f;
-    float maxAccelerationDegPerS2 = 360.0f;
+    float maxVelocityDegPerS = 120.0f;
+    float maxAccelerationDegPerS2 = 240.0f;
     uint32_t watchdogTimeoutMs = 500;
     FailSafeBehavior failSafeBehavior = FailSafeBehavior::NEUTRAL_POSITION;
     float startupAngleDeg = 0.0f;
@@ -38,7 +38,7 @@ struct ServoConfig {
 struct ServoState {
     float currentAngleDeg = 0.0f;
     float targetAngleDeg = 0.0f;
-    uint16_t currentPulseUs = 1500;
+    uint16_t currentPulseUs = 1250;
     bool enabled = false;
     ServoStatus status = ServoStatus::NOT_INITIALIZED;
     uint32_t lastCommandTime = 0;
