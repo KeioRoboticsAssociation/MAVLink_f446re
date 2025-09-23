@@ -1,4 +1,9 @@
 #include "main.hpp"
+
+// New architecture includes
+#include "main_app.cpp"
+
+// Legacy includes (for gradual migration)
 #include "ServoMotor.hpp"
 #include "MAVLinkServoController.hpp"
 #include "RoboMasterMotor.hpp"
@@ -57,6 +62,10 @@ DCMotor dcmotor1(&htim3, TIM_CHANNEL_1, GPIOB, GPIO_PIN_8, true);
 
 
 void setup() {
+    // Initialize new architecture first
+    cpp_setup();
+
+    // Legacy initialization (gradually being replaced)
     // Initialize encoders
     encoder_dcmotor.create(1, &htim1);
 
@@ -180,6 +189,10 @@ void setup() {
 }
 
 void loop() {
+    // Update new architecture first
+    cpp_loop();
+
+    // Legacy loop processing (gradually being replaced)
     // Process any received UART data from interrupt buffer (limit iterations to prevent infinite loop)
     uint8_t max_iterations = 32;  // Process max 32 bytes per loop
     while (uart_rx_tail != uart_rx_head && max_iterations-- > 0) {
