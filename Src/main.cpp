@@ -1,7 +1,13 @@
 #include "main.hpp"
 
 // New architecture includes
-#include "main_app.cpp"
+// #include "main_app.cpp"  // Removed to avoid multiple definitions
+
+// Forward declarations
+extern "C" {
+    void cpp_setup();
+    void cpp_loop();
+}
 
 // Legacy includes (for gradual migration)
 #include "ServoMotor.hpp"
@@ -248,23 +254,23 @@ void loop() {
     HAL_Delay(10);
 }
 
-// UART receive complete interrupt callback
-extern "C" void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
-    if (huart->Instance == USART2) {
-        // Store byte in circular buffer (interrupt safe)
-        uint16_t next_head = (uart_rx_head + 1) % UART_BUFFER_SIZE;
-        if (next_head != uart_rx_tail) {  // Buffer not full
-            uart_rx_buffer[uart_rx_head] = rx_buffer[0];
-            uart_rx_head = next_head;
-        }
-        
-        // Re-enable interrupt for next byte
-        HAL_UART_Receive_IT(&huart2, rx_buffer, 1);
-        
-        // Toggle LED to indicate activity
-        HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_5);
-    }
-}
+// UART receive complete interrupt callback - now handled by hardware_manager.cpp
+// extern "C" void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
+//     if (huart->Instance == USART2) {
+//         // Store byte in circular buffer (interrupt safe)
+//         uint16_t next_head = (uart_rx_head + 1) % UART_BUFFER_SIZE;
+//         if (next_head != uart_rx_tail) {  // Buffer not full
+//             uart_rx_buffer[uart_rx_head] = rx_buffer[0];
+//             uart_rx_head = next_head;
+//         }
+//
+//         // Re-enable interrupt for next byte
+//         HAL_UART_Receive_IT(&huart2, rx_buffer, 1);
+//
+//         // Toggle LED to indicate activity
+//         HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_5);
+//     }
+// }
 
 // extern "C" void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan) {
 //     if (hcan->Instance == CAN1) {

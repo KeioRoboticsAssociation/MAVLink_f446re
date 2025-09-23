@@ -21,7 +21,7 @@ public:
     struct Hardware {
         std::unique_ptr<HAL::HardwareManager> manager;
 
-        Config::Result<Config::ErrorCode> initialize() {
+        Config::Result<void> initialize() {
             manager = std::make_unique<HAL::HardwareManager>();
             return manager->initialize();
         }
@@ -31,27 +31,34 @@ public:
 
     // Motor subsystem
     struct Motors {
-        std::unique_ptr<Motors::MotorRegistry> registry;
-        std::unique_ptr<Motors::IMotorFactory> factory;
+        // TODO: Add motor registry and factory when implemented
+        // std::unique_ptr<Motors::MotorRegistry> registry;
+        // std::unique_ptr<Motors::IMotorFactory> factory;
 
         Config::Result<Config::ErrorCode> initialize(HAL::HardwareManager* hwManager);
 
-        Motors::MotorRegistry* getRegistry() const { return registry.get(); }
-        Motors::IMotorFactory* getFactory() const { return factory.get(); }
+        // TODO: Implement getters when classes exist
+        // Motors::MotorRegistry* getRegistry() const { return registry.get(); }
+        // Motors::IMotorFactory* getFactory() const { return factory.get(); }
 
         Config::Result<Config::ErrorCode> createAllMotors();
     } motors;
 
     // Communication subsystem
     struct Communication {
-        std::unique_ptr<Communication::UnifiedMAVLinkHandler> mavlink;
+        // TODO: Add MAVLink handler when implemented
+        // std::unique_ptr<Communication::UnifiedMAVLinkHandler> mavlink;
 
         Config::Result<Config::ErrorCode> initialize(HAL::HardwareManager* hwManager) {
-            mavlink = std::make_unique<Communication::UnifiedMAVLinkHandler>(hwManager);
-            return mavlink->initialize();
+            // TODO: Implement UnifiedMAVLinkHandler
+            // mavlink = std::make_unique<Communication::UnifiedMAVLinkHandler>(hwManager);
+            // return mavlink->initialize();
+            (void)hwManager; // Suppress unused parameter warning
+            return Config::ErrorCode::OK;
         }
 
-        Communication::UnifiedMAVLinkHandler* get() const { return mavlink.get(); }
+        // TODO: Implement getter when class exists
+        // Communication::UnifiedMAVLinkHandler* get() const { return mavlink.get(); }
     } communication;
 
     // Safety subsystem
@@ -81,8 +88,10 @@ public:
 
     // Subsystem access
     HAL::HardwareManager* getHardware() const { return hardware.get(); }
-    Motors::MotorRegistry* getMotors() const { return motors.getRegistry(); }
-    Communication::UnifiedMAVLinkHandler* getCommunication() const { return communication.get(); }
+    // TODO: Implement getMotors() when MotorRegistry exists
+    // Motors::MotorRegistry* getMotors() const { return motors.getRegistry(); }
+    // TODO: Implement getCommunication() when UnifiedMAVLinkHandler exists
+    // Communication::UnifiedMAVLinkHandler* getCommunication() const { return communication.get(); }
     SafetyManager* getSafety() const { return safety.get(); }
 
     // State access
@@ -138,8 +147,8 @@ public:
     Config::Result<Config::ErrorCode> initialize();
 
     // Safety monitoring
-    Config::Result<Config::ErrorCode> update();
-    Config::Result<Config::ErrorCode> checkAllLimits();
+    Config::Result<void> update();
+    Config::Result<void> checkAllLimits();
 
     // Limit switch management
     Config::Result<Config::ErrorCode> registerLimitSwitch(GPIO_TypeDef* port, uint16_t pin,

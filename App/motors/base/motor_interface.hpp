@@ -4,6 +4,7 @@
 #include "../../config/motor_config.hpp"
 #include <cstdint>
 #include <functional>
+#include <memory>
 
 namespace Motors {
 

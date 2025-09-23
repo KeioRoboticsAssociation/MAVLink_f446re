@@ -40,10 +40,10 @@ struct GPIOHandle {
 
 // Timer IDs for type-safe access
 enum class TimerID : uint8_t {
-    TIMER1 = 1,
-    TIMER2 = 2,
-    TIMER3 = 3,
-    TIMER4 = 4,
+    TIM_1 = 1,
+    TIM_2 = 2,
+    TIM_3 = 3,
+    TIM_4 = 4,
     MAX_TIMERS = 4
 };
 
@@ -68,29 +68,29 @@ private:
 
 public:
     // Initialization
-    Config::Result<Config::ErrorCode> initialize();
+    Config::Result<void> initialize();
     bool isInitialized() const { return initialized_; }
 
     // Timer management
     Config::Result<TimerHandle*> getTimer(TimerID id);
-    Config::Result<Config::ErrorCode> startPWM(TimerID id, uint32_t channel);
-    Config::Result<Config::ErrorCode> setPWMDutyCycle(TimerID id, uint32_t channel, uint32_t value);
-    Config::Result<Config::ErrorCode> setTimerCallback(TimerID id, std::function<void()> callback);
+    Config::Result<void> startPWM(TimerID id, uint32_t channel);
+    Config::Result<void> setPWMDutyCycle(TimerID id, uint32_t channel, uint32_t value);
+    Config::Result<void> setTimerCallback(TimerID id, std::function<void()> callback);
 
     // UART management
     Config::Result<UARTHandle*> getUART(UARTID id);
-    Config::Result<Config::ErrorCode> transmitUART(UARTID id, const uint8_t* data, size_t length);
-    Config::Result<Config::ErrorCode> setUARTRxCallback(UARTID id, std::function<void(uint8_t*, size_t)> callback);
+    Config::Result<void> transmitUART(UARTID id, const uint8_t* data, size_t length);
+    Config::Result<void> setUARTRxCallback(UARTID id, std::function<void(uint8_t*, size_t)> callback);
 
     // CAN management
     Config::Result<CANHandle*> getCAN(CANID id);
-    Config::Result<Config::ErrorCode> transmitCAN(CANID id, uint32_t canId, const uint8_t* data, size_t length);
-    Config::Result<Config::ErrorCode> setCANRxCallback(CANID id, std::function<void(CAN_RxHeaderTypeDef*, uint8_t*)> callback);
+    Config::Result<void> transmitCAN(CANID id, uint32_t canId, const uint8_t* data, size_t length);
+    Config::Result<void> setCANRxCallback(CANID id, std::function<void(CAN_RxHeaderTypeDef*, uint8_t*)> callback);
 
     // GPIO management
     Config::Result<bool> readGPIO(GPIO_TypeDef* port, uint16_t pin);
-    Config::Result<Config::ErrorCode> writeGPIO(GPIO_TypeDef* port, uint16_t pin, bool state);
-    Config::Result<Config::ErrorCode> setGPIOCallback(GPIO_TypeDef* port, uint16_t pin, std::function<void(bool)> callback);
+    Config::Result<void> writeGPIO(GPIO_TypeDef* port, uint16_t pin, bool state);
+    Config::Result<void> setGPIOCallback(GPIO_TypeDef* port, uint16_t pin, std::function<void(bool)> callback);
 
     // System utilities
     uint32_t getSystemTick() const { return HAL_GetTick(); }
@@ -102,9 +102,9 @@ public:
     void handleCANError(CANID id);
 
 private:
-    Config::Result<Config::ErrorCode> initializeTimers();
-    Config::Result<Config::ErrorCode> initializeUARTs();
-    Config::Result<Config::ErrorCode> initializeCAN();
+    Config::Result<void> initializeTimers();
+    Config::Result<void> initializeUARTs();
+    Config::Result<void> initializeCAN();
 
     TimerHandle* getTimerHandle(TimerID id);
     UARTHandle* getUARTHandle(UARTID id);

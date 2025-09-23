@@ -129,24 +129,25 @@ Config::Result<Config::ErrorCode> SystemContext::update() {
 
     // Skip motor updates if in emergency stop
     if (!state.emergencyStop) {
-        // Update motors
-        motors.getRegistry()->updateAll(deltaTime);
+        // TODO: Update motors
+        // motors.getRegistry()->updateAll(deltaTime);
+        (void)deltaTime; // Suppress unused warning
     }
 
-    // Update communication
-    auto commResult = communication.get()->update();
-    if (!commResult) {
-        reportError(commResult.error(), "Communication update failed");
-        // Don't return error for communication failures - continue running
-    }
+    // TODO: Update communication
+    // auto commResult = communication.get()->update();
+    // if (!commResult) {
+    //     reportError(commResult.error(), "Communication update failed");
+    //     // Don't return error for communication failures - continue running
+    // }
 
     return Config::ErrorCode::OK;
 }
 
 void SystemContext::shutdown() {
     if (state.initialized) {
-        // Stop all motors
-        motors.getRegistry()->emergencyStopAll();
+        // TODO: Stop all motors
+        // motors.getRegistry()->emergencyStopAll();
 
         // Reset state
         state.initialized = false;
@@ -164,7 +165,7 @@ uint32_t SystemContext::getUptime() const {
 void SystemContext::setEmergencyStop(bool emergency) {
     if (emergency && !state.emergencyStop) {
         // Entering emergency stop
-        motors.getRegistry()->emergencyStopAll();
+        // TODO: motors.getRegistry()->emergencyStopAll();
         safety.get()->triggerEmergencyStop("External trigger");
     } else if (!emergency && state.emergencyStop) {
         // Clearing emergency stop
@@ -179,21 +180,23 @@ void SystemContext::reportError(Config::ErrorCode error, const char* context) {
     state.errorCount++;
 
     // Log error if context provided (in debug builds)
-    #if Config::ENABLE_DEBUG_LOGGING
-    if (context) {
-        // Would log to debug output
-        (void)context; // Suppress unused warning in release
+    if constexpr (Config::Debug::LOGGING_ENABLED) {
+        if (context) {
+            // Would log to debug output
+            (void)context; // Suppress unused warning in release
+        }
     }
-    #endif
 }
 
 // Motor subsystem implementation
 Config::Result<Config::ErrorCode> SystemContext::Motors::initialize(HAL::HardwareManager* hwManager) {
-    registry = std::make_unique<Motors::MotorRegistry>();
+    // TODO: Implement MotorRegistry
+    // registry = std::make_unique<Motors::MotorRegistry>();
 
     // Create concrete motor factory (implementation would be in separate file)
     // factory = std::make_unique<ConcreteMotorFactory>(hwManager);
 
+    (void)hwManager; // Suppress unused parameter warning
     return Config::ErrorCode::OK;
 }
 
@@ -244,7 +247,7 @@ Config::Result<Config::ErrorCode> SafetyManager::initialize() {
     lastHeartbeat_ = lastSafetyCheck_;
 
     // Setup safety monitoring callbacks
-    setStateChangeCallback([this](SafetyState oldState, SafetyState newState) {
+    setStateChangeCallback([this](SafetyState /*oldState*/, SafetyState newState) {
         // Handle state transitions
         if (newState == SafetyState::EMERGENCY_STOP) {
             systemContext_->setEmergencyStop(true);
@@ -254,7 +257,7 @@ Config::Result<Config::ErrorCode> SafetyManager::initialize() {
     return Config::ErrorCode::OK;
 }
 
-Config::Result<Config::ErrorCode> SafetyManager::update() {
+Config::Result<void> SafetyManager::update() {
     uint32_t currentTime = hwManager_->getSystemTick();
 
     // Run safety checks every 100ms
@@ -263,18 +266,18 @@ Config::Result<Config::ErrorCode> SafetyManager::update() {
         lastSafetyCheck_ = currentTime;
 
         if (!result) {
-            return result.error();
+            return Config::Result<void>(result.error());
         }
     }
 
-    return Config::ErrorCode::OK;
+    return Config::Result<void>();
 }
 
-Config::Result<Config::ErrorCode> SafetyManager::checkAllLimits() {
+Config::Result<void> SafetyManager::checkAllLimits() {
     // Check heartbeat timeout
     if (!isHeartbeatValid()) {
         triggerEmergencyStop("Heartbeat timeout");
-        return Config::ErrorCode::TIMEOUT;
+        return Config::Result<void>(Config::ErrorCode::TIMEOUT);
     }
 
     // Additional safety checks would go here
@@ -282,7 +285,7 @@ Config::Result<Config::ErrorCode> SafetyManager::checkAllLimits() {
     // - Current monitoring
     // - Limit switch states
 
-    return Config::ErrorCode::OK;
+    return Config::Result<void>();
 }
 
 bool SafetyManager::isHeartbeatValid() const {

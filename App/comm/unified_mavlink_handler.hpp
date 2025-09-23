@@ -45,7 +45,7 @@ public:
 
     Config::Result<uint8_t> pop() {
         if (head_ == tail_) {
-            return Config::ErrorCode::OUT_OF_RANGE; // Buffer empty
+            return Config::Result<uint8_t>(Config::ErrorCode::OUT_OF_RANGE); // Buffer empty
         }
         uint8_t data = buffer_[tail_];
         tail_ = (tail_ + 1) % SIZE;

@@ -30,7 +30,7 @@ private:
 public:
     Result(T&& val) : hasValue_(true), value_(std::move(val)) {}
     Result(const T& val) : hasValue_(true), value_(val) {}
-    Result(ErrorCode err) : hasValue_(false), error_(err) {}
+    explicit Result(ErrorCode err) : hasValue_(false), error_(err) {}
 
     ~Result() {
         if (hasValue_) {
@@ -68,6 +68,24 @@ public:
     explicit operator bool() const { return isOk(); }
     T& operator*() { return get(); }
     const T& operator*() const { return get(); }
+};
+
+// Helper factory functions to create Result instances
+struct ResultFactory {
+    template<typename T>
+    static Result<T> success(T&& value) {
+        return Result<T>(std::forward<T>(value));
+    }
+
+    template<typename T>
+    static Result<T> success(const T& value) {
+        return Result<T>(value);
+    }
+
+    template<typename T>
+    static Result<T> error(ErrorCode err) {
+        return Result<T>(err);
+    }
 };
 
 // Specialization for void type
