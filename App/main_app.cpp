@@ -201,37 +201,60 @@ Config::Result<Config::ErrorCode> SystemContext::Motors::initialize(HAL::Hardwar
 }
 
 Config::Result<Config::ErrorCode> SystemContext::Motors::createAllMotors() {
-    // Create motors based on compile-time configuration
-    for (const auto& motorConfig : Config::MOTOR_INSTANCES) {
-        if (!motorConfig.enabled) {
+    // Create motors based on compile-time configuration from robot_config.hpp
+    for (const auto& motorInstance : Config::MOTOR_INSTANCES) {
+        if (!motorInstance.enabled) {
             continue;
         }
 
-        // Create motor based on type
-        switch (motorConfig.type) {
+        // Create motor based on type using configuration data
+        switch (motorInstance.type) {
             case Config::MotorInstance::Type::SERVO: {
-                // auto servo = factory->createServo(motorConfig.id);
-                // if (servo) {
-                //     registry->registerMotor(motorConfig.id, std::move(servo));
-                // }
+                // Get servo-specific configuration by ID
+                const auto* servoConfig = Config::ConfigAccessor::getServoConfig(motorInstance.id);
+                if (servoConfig) {
+                    // Configuration-driven servo creation
+                    // TODO: Implement servo factory when servo classes are available
+                    // Example: factory->createServo(motorInstance.id, *servoConfig, timer_handle);
+
+                    // For now, log that the servo would be created with these parameters
+                    (void)servoConfig; // Suppress unused warning
+                }
                 break;
             }
             case Config::MotorInstance::Type::DC_MOTOR: {
-                // auto dcMotor = factory->createDCMotor(motorConfig.id);
-                // if (dcMotor) {
-                //     registry->registerMotor(motorConfig.id, std::move(dcMotor));
-                // }
+                // Get DC motor-specific configuration by ID
+                const auto* dcConfig = Config::ConfigAccessor::getDCMotorConfig(motorInstance.id);
+                if (dcConfig) {
+                    // Configuration-driven DC motor creation
+                    // TODO: Implement DC motor factory when motor classes are available
+                    // Example: factory->createDCMotor(motorInstance.id, *dcConfig, timer_handle, gpio_handle);
+
+                    // For now, log that the DC motor would be created with these parameters
+                    (void)dcConfig; // Suppress unused warning
+                }
                 break;
             }
             case Config::MotorInstance::Type::ROBOMASTER: {
-                // auto roboMaster = factory->createRoboMaster(motorConfig.id);
-                // if (roboMaster) {
-                //     registry->registerMotor(motorConfig.id, std::move(roboMaster));
-                // }
+                // Get RoboMaster-specific configuration by ID
+                const auto* roboConfig = Config::ConfigAccessor::getRoboMasterConfig(motorInstance.id);
+                if (roboConfig) {
+                    // Configuration-driven RoboMaster motor creation
+                    // TODO: Implement RoboMaster factory when motor classes are available
+                    // Example: factory->createRoboMaster(motorInstance.id, *roboConfig, can_handle);
+
+                    // For now, log that the RoboMaster motor would be created with these parameters
+                    (void)roboConfig; // Suppress unused warning
+                }
                 break;
             }
         }
     }
+
+    // Configuration validation: Verify all device configurations are consistent
+    static_assert(Config::Devices::SERVO_CONFIGS.size() >= 1, "At least one servo configuration required");
+    static_assert(Config::Devices::DC_MOTOR_CONFIGS.size() >= 1, "At least one DC motor configuration required");
+    static_assert(Config::Robot::MAX_SERVOS >= Config::Devices::SERVO_CONFIGS.size(), "Robot servo limit exceeded");
 
     return Config::ErrorCode::OK;
 }
@@ -246,9 +269,15 @@ Config::Result<Config::ErrorCode> SafetyManager::initialize() {
     lastSafetyCheck_ = hwManager_->getSystemTick();
     lastHeartbeat_ = lastSafetyCheck_;
 
+    // Configure safety limits from robot configuration
+    limits_.heartbeatTimeout = Config::Robot::SYSTEM_WATCHDOG_TIMEOUT_MS;
+    limits_.maxTemperature = Config::SafetyLimits::MAX_TEMPERATURE_C;
+    limits_.maxCurrent = Config::SafetyLimits::MAX_CURRENT_A;
+    limits_.maxVoltage = Config::SafetyLimits::MAX_VOLTAGE_V;
+
     // Setup safety monitoring callbacks
     setStateChangeCallback([this](SafetyState /*oldState*/, SafetyState newState) {
-        // Handle state transitions
+        // Handle state transitions based on robot configuration
         if (newState == SafetyState::EMERGENCY_STOP) {
             systemContext_->setEmergencyStop(true);
         }
