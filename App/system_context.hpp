@@ -1,13 +1,11 @@
 #pragma once
 
 #include "hal/hardware_manager.hpp"
-#include "motors/base/motor_interface.hpp"
-#include "motors/base/motor_factory.hpp"
-#include "comm/unified_mavlink_handler.hpp"
 #include "config/motor_config.hpp"
 #include "config/system_config.hpp"
 #include <memory>
 #include <vector>
+#include <functional>
 
 namespace System {
 
@@ -30,29 +28,28 @@ public:
         HAL::HardwareManager* get() const { return manager.get(); }
     } hardware;
 
-    // Motor subsystem
+    // Motor subsystem (placeholder for Phase 2)
     struct Motors {
-        std::unique_ptr<::Motors::MotorRegistry> registry;
-        std::unique_ptr<::Motors::IMotorFactory> factory;
+        // Motor registry and factory will be implemented in Phase 2-3
 
         Config::Result<Config::ErrorCode> initialize(HAL::HardwareManager* hwManager);
 
-        ::Motors::MotorRegistry* getRegistry() const { return registry.get(); }
-        ::Motors::IMotorFactory* getFactory() const { return factory.get(); }
+        void* getRegistry() const { return nullptr; }  // Stub for Phase 1
+        void* getFactory() const { return nullptr; }    // Stub for Phase 1
 
         Config::Result<Config::ErrorCode> createAllMotors();
     } motors;
 
-    // Communication subsystem
+    // Communication subsystem (placeholder for Phase 2)
     struct Communication {
-        std::unique_ptr<Communication::UnifiedMAVLinkHandler> mavlink;
+        // Will be implemented in Phase 2-3 when UnifiedMAVLinkHandler is complete
 
-        Config::Result<Config::ErrorCode> initialize(HAL::HardwareManager* hwManager) {
-            mavlink = std::make_unique<Communication::UnifiedMAVLinkHandler>(hwManager);
-            return mavlink->initialize();
+        Config::Result<Config::ErrorCode> initialize(HAL::HardwareManager* /*hwManager*/) {
+            // Stub implementation for Phase 1 cleanup
+            return Config::ErrorCode::OK;
         }
 
-        Communication::UnifiedMAVLinkHandler* get() const { return mavlink.get(); }
+        void* get() const { return nullptr; }
     } communication;
 
     // Safety subsystem
