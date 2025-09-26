@@ -2,6 +2,7 @@
 
 #include "hal/hardware_manager.hpp"
 #include "motors/base/motor_interface.hpp"
+#include "motors/base/motor_factory.hpp"
 #include "comm/unified_mavlink_handler.hpp"
 #include "config/motor_config.hpp"
 #include "config/system_config.hpp"
@@ -31,34 +32,27 @@ public:
 
     // Motor subsystem
     struct Motors {
-        // TODO: Add motor registry and factory when implemented
-        // std::unique_ptr<Motors::MotorRegistry> registry;
-        // std::unique_ptr<Motors::IMotorFactory> factory;
+        std::unique_ptr<::Motors::MotorRegistry> registry;
+        std::unique_ptr<::Motors::IMotorFactory> factory;
 
         Config::Result<Config::ErrorCode> initialize(HAL::HardwareManager* hwManager);
 
-        // TODO: Implement getters when classes exist
-        // Motors::MotorRegistry* getRegistry() const { return registry.get(); }
-        // Motors::IMotorFactory* getFactory() const { return factory.get(); }
+        ::Motors::MotorRegistry* getRegistry() const { return registry.get(); }
+        ::Motors::IMotorFactory* getFactory() const { return factory.get(); }
 
         Config::Result<Config::ErrorCode> createAllMotors();
     } motors;
 
     // Communication subsystem
     struct Communication {
-        // TODO: Add MAVLink handler when implemented
-        // std::unique_ptr<Communication::UnifiedMAVLinkHandler> mavlink;
+        std::unique_ptr<Communication::UnifiedMAVLinkHandler> mavlink;
 
         Config::Result<Config::ErrorCode> initialize(HAL::HardwareManager* hwManager) {
-            // TODO: Implement UnifiedMAVLinkHandler
-            // mavlink = std::make_unique<Communication::UnifiedMAVLinkHandler>(hwManager);
-            // return mavlink->initialize();
-            (void)hwManager; // Suppress unused parameter warning
-            return Config::ErrorCode::OK;
+            mavlink = std::make_unique<Communication::UnifiedMAVLinkHandler>(hwManager);
+            return mavlink->initialize();
         }
 
-        // TODO: Implement getter when class exists
-        // Communication::UnifiedMAVLinkHandler* get() const { return mavlink.get(); }
+        Communication::UnifiedMAVLinkHandler* get() const { return mavlink.get(); }
     } communication;
 
     // Safety subsystem

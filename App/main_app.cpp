@@ -1,5 +1,7 @@
 #include "system_context.hpp"
 #include "config/motor_config.hpp"
+#include "motors/base/motor_factory.hpp"
+#include "comm/unified_mavlink_handler.hpp"
 
 // External C dependencies from STM32 HAL
 extern "C" {
@@ -129,25 +131,30 @@ Config::Result<Config::ErrorCode> SystemContext::update() {
 
     // Skip motor updates if in emergency stop
     if (!state.emergencyStop) {
-        // TODO: Update motors
-        // motors.getRegistry()->updateAll(deltaTime);
-        (void)deltaTime; // Suppress unused warning
+        // Update all motors using the registry
+        if (motors.getRegistry()) {
+            motors.getRegistry()->updateAll(deltaTime);
+        }
     }
 
-    // TODO: Update communication
-    // auto commResult = communication.get()->update();
-    // if (!commResult) {
-    //     reportError(commResult.error(), "Communication update failed");
-    //     // Don't return error for communication failures - continue running
-    // }
+    // Update communication
+    if (communication.get()) {
+        auto commResult = communication.get()->update();
+        if (!commResult) {
+            reportError(commResult.error(), "Communication update failed");
+            // Don't return error for communication failures - continue running
+        }
+    }
 
     return Config::ErrorCode::OK;
 }
 
 void SystemContext::shutdown() {
     if (state.initialized) {
-        // TODO: Stop all motors
-        // motors.getRegistry()->emergencyStopAll();
+        // Stop all motors
+        if (motors.getRegistry()) {
+            motors.getRegistry()->emergencyStopAll();
+        }
 
         // Reset state
         state.initialized = false;
@@ -165,7 +172,9 @@ uint32_t SystemContext::getUptime() const {
 void SystemContext::setEmergencyStop(bool emergency) {
     if (emergency && !state.emergencyStop) {
         // Entering emergency stop
-        // TODO: motors.getRegistry()->emergencyStopAll();
+        if (motors.getRegistry()) {
+            motors.getRegistry()->emergencyStopAll();
+        }
         safety.get()->triggerEmergencyStop("External trigger");
     } else if (!emergency && state.emergencyStop) {
         // Clearing emergency stop
@@ -190,61 +199,57 @@ void SystemContext::reportError(Config::ErrorCode error, const char* context) {
 
 // Motor subsystem implementation
 Config::Result<Config::ErrorCode> SystemContext::Motors::initialize(HAL::HardwareManager* hwManager) {
-    // TODO: Implement MotorRegistry
-    // registry = std::make_unique<Motors::MotorRegistry>();
+    // Create motor registry
+    registry = std::make_unique<::Motors::MotorRegistry>();
 
-    // Create concrete motor factory (implementation would be in separate file)
-    // factory = std::make_unique<ConcreteMotorFactory>(hwManager);
+    // Create concrete motor factory
+    factory = std::make_unique<::Motors::ConcreteMotorFactory>(hwManager);
 
-    (void)hwManager; // Suppress unused parameter warning
     return Config::ErrorCode::OK;
 }
 
 Config::Result<Config::ErrorCode> SystemContext::Motors::createAllMotors() {
+    if (!factory || !registry) {
+        return Config::ErrorCode::NOT_INITIALIZED;
+    }
+
     // Create motors based on compile-time configuration from robot_config.hpp
+    // For now, implement basic structure - the actual motor creation will be implemented
+    // when the motor controller classes are fully integrated with the new architecture
+
+    size_t motorsCreated = 0;
     for (const auto& motorInstance : Config::MOTOR_INSTANCES) {
         if (!motorInstance.enabled) {
             continue;
         }
 
-        // Create motor based on type using configuration data
+        // For Phase 3, we demonstrate the configuration-driven approach
+        // The actual motor controllers will be created in a future implementation
         switch (motorInstance.type) {
             case Config::MotorInstance::Type::SERVO: {
-                // Get servo-specific configuration by ID
+                // Validate servo configuration exists
                 const auto* servoConfig = Config::ConfigAccessor::getServoConfig(motorInstance.id);
                 if (servoConfig) {
-                    // Configuration-driven servo creation
-                    // TODO: Implement servo factory when servo classes are available
-                    // Example: factory->createServo(motorInstance.id, *servoConfig, timer_handle);
-
-                    // For now, log that the servo would be created with these parameters
-                    (void)servoConfig; // Suppress unused warning
+                    motorsCreated++;
+                    // TODO: Complete servo creation when motor controllers are integrated
                 }
                 break;
             }
             case Config::MotorInstance::Type::DC_MOTOR: {
-                // Get DC motor-specific configuration by ID
+                // Validate DC motor configuration exists
                 const auto* dcConfig = Config::ConfigAccessor::getDCMotorConfig(motorInstance.id);
                 if (dcConfig) {
-                    // Configuration-driven DC motor creation
-                    // TODO: Implement DC motor factory when motor classes are available
-                    // Example: factory->createDCMotor(motorInstance.id, *dcConfig, timer_handle, gpio_handle);
-
-                    // For now, log that the DC motor would be created with these parameters
-                    (void)dcConfig; // Suppress unused warning
+                    motorsCreated++;
+                    // TODO: Complete DC motor creation when motor controllers are integrated
                 }
                 break;
             }
             case Config::MotorInstance::Type::ROBOMASTER: {
-                // Get RoboMaster-specific configuration by ID
+                // Validate RoboMaster configuration exists
                 const auto* roboConfig = Config::ConfigAccessor::getRoboMasterConfig(motorInstance.id);
                 if (roboConfig) {
-                    // Configuration-driven RoboMaster motor creation
-                    // TODO: Implement RoboMaster factory when motor classes are available
-                    // Example: factory->createRoboMaster(motorInstance.id, *roboConfig, can_handle);
-
-                    // For now, log that the RoboMaster motor would be created with these parameters
-                    (void)roboConfig; // Suppress unused warning
+                    motorsCreated++;
+                    // TODO: Complete RoboMaster creation when motor controllers are integrated
                 }
                 break;
             }
@@ -255,6 +260,9 @@ Config::Result<Config::ErrorCode> SystemContext::Motors::createAllMotors() {
     static_assert(Config::Devices::SERVO_CONFIGS.size() >= 1, "At least one servo configuration required");
     static_assert(Config::Devices::DC_MOTOR_CONFIGS.size() >= 1, "At least one DC motor configuration required");
     static_assert(Config::Robot::MAX_SERVOS >= Config::Devices::SERVO_CONFIGS.size(), "Robot servo limit exceeded");
+
+    // Report successful validation of configuration-driven approach
+    (void)motorsCreated; // Suppress unused warning
 
     return Config::ErrorCode::OK;
 }
