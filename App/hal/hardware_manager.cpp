@@ -104,6 +104,18 @@ Config::Result<void> HardwareManager::transmitUART(UARTID id, const uint8_t* dat
     return Config::Result<void>();
 }
 
+Config::Result<void> HardwareManager::setUARTRxCallback(UARTID id, std::function<void(uint8_t*, size_t)> callback) {
+    auto uartResult = getUART(id);
+    if (!uartResult) {
+        return Config::Result<void>(uartResult.error());
+    }
+
+    auto* uart = uartResult.get();
+    uart->rxCallback = callback;
+
+    return Config::Result<void>();
+}
+
 Config::Result<CANHandle*> HardwareManager::getCAN(CANID id) {
     if (!initialized_) {
         return Config::Result<CANHandle*>(Config::ErrorCode::NOT_INITIALIZED);

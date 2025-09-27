@@ -7,6 +7,16 @@
 #include <vector>
 #include <functional>
 
+// Forward declarations
+namespace Motors {
+    class MotorRegistry;
+    class IMotorFactory;
+}
+
+namespace Communication {
+    class UnifiedMAVLinkHandler;
+}
+
 namespace System {
 
 // Forward declarations
@@ -28,28 +38,24 @@ public:
         HAL::HardwareManager* get() const { return manager.get(); }
     } hardware;
 
-    // Motor subsystem (placeholder for Phase 2)
+    // Motor subsystem
     struct Motors {
-        // Motor registry and factory will be implemented in Phase 2-3
+        std::unique_ptr<class ::Motors::MotorRegistry> registry_;
+        std::unique_ptr<class ::Motors::IMotorFactory> factory_;
 
         Config::Result<Config::ErrorCode> initialize(HAL::HardwareManager* hwManager);
-
-        void* getRegistry() const { return nullptr; }  // Stub for Phase 1
-        void* getFactory() const { return nullptr; }    // Stub for Phase 1
-
         Config::Result<Config::ErrorCode> createAllMotors();
+
+        ::Motors::MotorRegistry* getRegistry() const;
+        ::Motors::IMotorFactory* getFactory() const;
     } motors;
 
-    // Communication subsystem (placeholder for Phase 2)
+    // Communication subsystem
     struct Communication {
-        // Will be implemented in Phase 2-3 when UnifiedMAVLinkHandler is complete
+        std::unique_ptr<class ::Communication::UnifiedMAVLinkHandler> handler_;
 
-        Config::Result<Config::ErrorCode> initialize(HAL::HardwareManager* /*hwManager*/) {
-            // Stub implementation for Phase 1 cleanup
-            return Config::ErrorCode::OK;
-        }
-
-        void* get() const { return nullptr; }
+        Config::Result<Config::ErrorCode> initialize(HAL::HardwareManager* hwManager, ::Motors::MotorRegistry* motorRegistry);
+        ::Communication::UnifiedMAVLinkHandler* get() const;
     } communication;
 
     // Safety subsystem
@@ -79,10 +85,8 @@ public:
 
     // Subsystem access
     HAL::HardwareManager* getHardware() const { return hardware.get(); }
-    // TODO: Implement getMotors() when MotorRegistry exists
-    // Motors::MotorRegistry* getMotors() const { return motors.getRegistry(); }
-    // TODO: Implement getCommunication() when UnifiedMAVLinkHandler exists
-    // Communication::UnifiedMAVLinkHandler* getCommunication() const { return communication.get(); }
+    ::Motors::MotorRegistry* getMotors() const { return motors.getRegistry(); }
+    ::Communication::UnifiedMAVLinkHandler* getCommunication() const { return communication.get(); }
     SafetyManager* getSafety() const { return safety.get(); }
 
     // State access

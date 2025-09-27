@@ -11,18 +11,15 @@ extern "C" {
 #include <functional>
 #include <array>
 #include <queue>
+#include <memory>
 
 namespace Communication {
 
-// MAVLink device interface for different motor types
-class IMAVLinkDevice {
-public:
-    virtual ~IMAVLinkDevice() = default;
-    virtual uint8_t getDeviceId() const = 0;
-    virtual Config::Result<Config::ErrorCode> handleMessage(const mavlink_message_t& msg) = 0;
-    virtual Config::Result<Config::ErrorCode> generateTelemetry(mavlink_message_t& msg, uint8_t systemId, uint8_t componentId) = 0;
-    virtual bool hasPendingTelemetry() const = 0;
-};
+// Forward declarations
+class MessageDispatcher;
+class MotorCommandDispatcher;
+class ParameterDispatcher;
+class TelemetryDispatcher;
 
 // Ring buffer for UART communication
 template<size_t SIZE>
@@ -65,7 +62,7 @@ public:
     }
 };
 
-// Unified MAVLink communication manager
+// Unified MAVLink communication manager using Message Dispatcher pattern
 class UnifiedMAVLinkHandler {
 private:
     // Communication state
@@ -73,52 +70,40 @@ private:
     mavlink_status_t mavlinkStatus_;
     mavlink_message_t rxMessage_;
 
-    // Device registry
-    std::array<IMAVLinkDevice*, Config::System::MAX_MOTORS> devices_;
-    size_t deviceCount_ = 0;
+    // Message dispatching system
+    std::unique_ptr<MessageDispatcher> messageDispatcher_;
+    std::unique_ptr<MotorCommandDispatcher> motorCommandDispatcher_;
+    std::unique_ptr<ParameterDispatcher> parameterDispatcher_;
+    std::unique_ptr<TelemetryDispatcher> telemetryDispatcher_;
 
     // Communication buffers
     RingBuffer<Config::Memory::RING_BUFFER_SIZE> rxBuffer_;
-    RingBuffer<Config::Memory::RING_BUFFER_SIZE> txBuffer_;
 
     // MAVLink parameters
     uint8_t systemId_;
     uint8_t componentId_;
 
-    // Telemetry timing
-    uint32_t lastHeartbeat_ = 0;
-    uint32_t lastTelemetry_ = 0;
-    size_t telemetryDeviceIndex_ = 0;
-
-    // Message queues
-    std::queue<mavlink_message_t> pendingMessages_;
-
     // Callbacks
     std::function<void(uint8_t, Config::ErrorCode)> errorCallback_;
 
 public:
-    UnifiedMAVLinkHandler(HAL::HardwareManager* hwManager, uint8_t systemId = Config::System::MAVLINK_SYSTEM_ID,
+    UnifiedMAVLinkHandler(HAL::HardwareManager* hwManager,
+                         Motors::MotorRegistry* motorRegistry,
+                         uint8_t systemId = Config::System::MAVLINK_SYSTEM_ID,
                          uint8_t componentId = Config::System::MAVLINK_COMPONENT_ID);
+
+    ~UnifiedMAVLinkHandler();
 
     // Initialization
     Config::Result<Config::ErrorCode> initialize();
 
-    // Device registration
-    Config::Result<Config::ErrorCode> registerDevice(IMAVLinkDevice* device);
-    Config::Result<Config::ErrorCode> unregisterDevice(uint8_t deviceId);
-
     // Communication
     Config::Result<Config::ErrorCode> update();
     Config::Result<Config::ErrorCode> sendMessage(const mavlink_message_t& msg);
-    Config::Result<Config::ErrorCode> queueMessage(const mavlink_message_t& msg);
 
     // Protocol handling
     void processReceivedByte(uint8_t byte);
     void handleReceivedMessage(const mavlink_message_t& msg);
-
-    // Telemetry
-    Config::Result<Config::ErrorCode> sendHeartbeat();
-    Config::Result<Config::ErrorCode> sendTelemetry();
 
     // Configuration
     void setSystemId(uint8_t systemId) { systemId_ = systemId; }
@@ -131,81 +116,25 @@ public:
         errorCallback_ = callback;
     }
 
+    // Access to dispatchers for configuration
+    MotorCommandDispatcher* getMotorCommandDispatcher() const { return motorCommandDispatcher_.get(); }
+    ParameterDispatcher* getParameterDispatcher() const { return parameterDispatcher_.get(); }
+    TelemetryDispatcher* getTelemetryDispatcher() const { return telemetryDispatcher_.get(); }
+
     // Statistics
-    size_t getRegisteredDeviceCount() const { return deviceCount_; }
-    size_t getPendingMessageCount() const { return pendingMessages_.size(); }
     size_t getRxBufferAvailable() const { return rxBuffer_.available(); }
-    size_t getTxBufferAvailable() const { return txBuffer_.available(); }
+    uint32_t getProcessedMessageCount() const;
+    uint32_t getDroppedMessageCount() const;
 
 private:
     // Internal helpers
     Config::Result<Config::ErrorCode> processRxBuffer();
-    Config::Result<Config::ErrorCode> processTxBuffer();
-    IMAVLinkDevice* findDevice(uint8_t deviceId);
     void handleError(Config::ErrorCode error);
-
-    // MAVLink message handlers
-    void handleHeartbeat(const mavlink_message_t& msg);
-    void handleParameterRequest(const mavlink_message_t& msg);
-    void handleCommandLong(const mavlink_message_t& msg);
-    void handleManualControl(const mavlink_message_t& msg);
-    void handleRcChannelsOverride(const mavlink_message_t& msg);
 
     // UART callbacks
     void onUartRxComplete(uint8_t* data, size_t length);
     void onUartTxComplete();
     void onUartError();
-};
-
-// Servo MAVLink device adapter
-class ServoMAVLinkDevice : public IMAVLinkDevice {
-private:
-    Motors::IMotorController<Config::ServoConfig>* controller_;
-    uint8_t deviceId_;
-
-public:
-    ServoMAVLinkDevice(Motors::IMotorController<Config::ServoConfig>* controller, uint8_t deviceId)
-        : controller_(controller), deviceId_(deviceId) {}
-
-    uint8_t getDeviceId() const override { return deviceId_; }
-
-    Config::Result<Config::ErrorCode> handleMessage(const mavlink_message_t& msg) override;
-    Config::Result<Config::ErrorCode> generateTelemetry(mavlink_message_t& msg, uint8_t systemId, uint8_t componentId) override;
-    bool hasPendingTelemetry() const override;
-};
-
-// DC Motor MAVLink device adapter
-class DCMotorMAVLinkDevice : public IMAVLinkDevice {
-private:
-    Motors::IMotorController<Config::DCMotorConfig>* controller_;
-    uint8_t deviceId_;
-
-public:
-    DCMotorMAVLinkDevice(Motors::IMotorController<Config::DCMotorConfig>* controller, uint8_t deviceId)
-        : controller_(controller), deviceId_(deviceId) {}
-
-    uint8_t getDeviceId() const override { return deviceId_; }
-
-    Config::Result<Config::ErrorCode> handleMessage(const mavlink_message_t& msg) override;
-    Config::Result<Config::ErrorCode> generateTelemetry(mavlink_message_t& msg, uint8_t systemId, uint8_t componentId) override;
-    bool hasPendingTelemetry() const override;
-};
-
-// RoboMaster MAVLink device adapter
-class RoboMasterMAVLinkDevice : public IMAVLinkDevice {
-private:
-    Motors::IMotorController<Config::RoboMasterConfig>* controller_;
-    uint8_t deviceId_;
-
-public:
-    RoboMasterMAVLinkDevice(Motors::IMotorController<Config::RoboMasterConfig>* controller, uint8_t deviceId)
-        : controller_(controller), deviceId_(deviceId) {}
-
-    uint8_t getDeviceId() const override { return deviceId_; }
-
-    Config::Result<Config::ErrorCode> handleMessage(const mavlink_message_t& msg) override;
-    Config::Result<Config::ErrorCode> generateTelemetry(mavlink_message_t& msg, uint8_t systemId, uint8_t componentId) override;
-    bool hasPendingTelemetry() const override;
 };
 
 } // namespace Communication

@@ -8,16 +8,8 @@
 
 namespace Motors {
 
-// Common motor status
-enum class MotorStatus : uint8_t {
-    OK = 0,
-    NOT_INITIALIZED = 1,
-    HARDWARE_ERROR = 2,
-    TIMEOUT = 3,
-    OUT_OF_RANGE = 4,
-    CONFIG_ERROR = 5,
-    EMERGENCY_STOP = 6
-};
+// Motor status using unified error codes
+using MotorStatus = Config::ErrorCode;
 
 // Base state structure for all motors
 struct BaseMotorState {
@@ -27,7 +19,7 @@ struct BaseMotorState {
     float targetVelocity = 0.0f;       // Target velocity
     float currentCurrent = 0.0f;       // Current draw in Amperes
     float temperature = 0.0f;          // Temperature in Celsius
-    MotorStatus status = MotorStatus::NOT_INITIALIZED;
+    MotorStatus status = Config::ErrorCode::NOT_INITIALIZED;
     bool enabled = false;
     uint32_t lastUpdateTime = 0;
     uint32_t errorCount = 0;
@@ -59,10 +51,10 @@ public:
     virtual ~IMotorController() = default;
 
     // Core interface
-    virtual Config::Result<MotorStatus> initialize(const TConfig& config) = 0;
-    virtual Config::Result<MotorStatus> update(float deltaTime) = 0;
-    virtual Config::Result<MotorStatus> setCommand(const MotorCommand& cmd) = 0;
-    virtual Config::Result<MotorStatus> setEnabled(bool enabled) = 0;
+    virtual Config::Result<void> initialize(const TConfig& config) = 0;
+    virtual Config::Result<void> update(float deltaTime) = 0;
+    virtual Config::Result<void> setCommand(const MotorCommand& cmd) = 0;
+    virtual Config::Result<void> setEnabled(bool enabled) = 0;
 
     // State access
     virtual BaseMotorState getState() const = 0;
@@ -72,10 +64,10 @@ public:
     // Safety and maintenance
     virtual void emergencyStop() = 0;
     virtual void resetWatchdog() = 0;
-    virtual Config::Result<MotorStatus> runSelfTest() = 0;
+    virtual Config::Result<void> runSelfTest() = 0;
 
     // Configuration
-    virtual Config::Result<MotorStatus> updateConfig(const TConfig& config) = 0;
+    virtual Config::Result<void> updateConfig(const TConfig& config) = 0;
     virtual TConfig getConfig() const = 0;
 
     // Callbacks for external systems
@@ -108,45 +100,86 @@ public:
     virtual std::unique_ptr<IMotorController<Config::RoboMasterConfig>> createRoboMaster(uint8_t id) = 0;
 };
 
+// Base class for type-erased motor controllers
+class IMotorControllerBase {
+public:
+    virtual ~IMotorControllerBase() = default;
+    virtual BaseMotorState getState() const = 0;
+    virtual Config::Result<void> setCommand(const MotorCommand& cmd) = 0;
+    virtual void emergencyStop() = 0;
+    virtual Config::Result<void> update(float deltaTime) = 0;
+    virtual uint8_t getId() const = 0;
+};
+
+// Template wrapper for type-erased motor controllers
+template<typename TController>
+class MotorControllerWrapper : public IMotorControllerBase {
+private:
+    std::unique_ptr<TController> controller_;
+
+public:
+    explicit MotorControllerWrapper(std::unique_ptr<TController> controller)
+        : controller_(std::move(controller)) {}
+
+    BaseMotorState getState() const override {
+        return controller_->getState();
+    }
+
+    Config::Result<void> setCommand(const MotorCommand& cmd) override {
+        return controller_->setCommand(cmd);
+    }
+
+    void emergencyStop() override {
+        controller_->emergencyStop();
+    }
+
+    Config::Result<void> update(float deltaTime) override {
+        return controller_->update(deltaTime);
+    }
+
+    uint8_t getId() const override {
+        return controller_->getId();
+    }
+
+    TController* get() const { return controller_.get(); }
+};
+
 // Motor registry for managing all motor instances
 class MotorRegistry {
 private:
     struct MotorInstance {
-        std::unique_ptr<void> controller; // Type-erased motor controller
+        std::unique_ptr<IMotorControllerBase> controller;
         Config::MotorInstance::Type type;
-        std::function<BaseMotorState()> getState;
-        std::function<Config::Result<MotorStatus>(const MotorCommand&)> setCommand;
-        std::function<void()> emergencyStop;
-        std::function<Config::Result<MotorStatus>(float)> update;
     };
 
     std::array<MotorInstance, Config::System::MAX_MOTORS> motors_;
     size_t motorCount_ = 0;
 
 public:
-    template<typename TController, typename TConfig>
+    template<typename TController>
     Config::Result<Config::ErrorCode> registerMotor(uint8_t id, std::unique_ptr<TController> controller) {
         if (motorCount_ >= Config::System::MAX_MOTORS) {
             return Config::ErrorCode::OUT_OF_RANGE;
         }
 
+        // Check for duplicate IDs
+        for (size_t i = 0; i < motorCount_; ++i) {
+            if (motors_[i].controller && motors_[i].controller->getId() == id) {
+                return Config::ErrorCode::CONFIG_ERROR;
+            }
+        }
+
         // Create type-erased wrapper
         MotorInstance instance;
-        auto rawPtr = controller.get();
-        instance.controller = std::move(controller);
-
-        // Setup function wrappers
-        instance.getState = [rawPtr]() { return rawPtr->getState(); };
-        instance.setCommand = [rawPtr](const MotorCommand& cmd) { return rawPtr->setCommand(cmd); };
-        instance.emergencyStop = [rawPtr]() { rawPtr->emergencyStop(); };
-        instance.update = [rawPtr](float dt) { return rawPtr->update(dt); };
+        instance.controller = std::make_unique<MotorControllerWrapper<TController>>(std::move(controller));
+        instance.type = Config::MotorInstance::Type::SERVO; // Default type, can be set properly later
 
         motors_[motorCount_++] = std::move(instance);
         return Config::ErrorCode::OK;
     }
 
     BaseMotorState getMotorState(uint8_t id) const;
-    Config::Result<MotorStatus> sendCommand(uint8_t id, const MotorCommand& cmd);
+    Config::Result<void> sendCommand(uint8_t id, const MotorCommand& cmd);
     void emergencyStopAll();
     void updateAll(float deltaTime);
     size_t getMotorCount() const { return motorCount_; }

@@ -31,6 +31,9 @@ private:
 
 // Servo motor controller implementation
 class ServoMotorController : public IMotorController<Config::ServoConfig> {
+public:
+    using config_type = Config::ServoConfig;
+
 private:
     uint8_t id_;
     Config::ServoConfig config_;
@@ -51,10 +54,10 @@ public:
     ServoMotorController(uint8_t id, HAL::HardwareManager* hwManager, HAL::TimerID timerId, uint32_t channel);
 
     // IMotorController implementation
-    Config::Result<MotorStatus> initialize(const Config::ServoConfig& config) override;
-    Config::Result<MotorStatus> update(float deltaTime) override;
-    Config::Result<MotorStatus> setCommand(const MotorCommand& cmd) override;
-    Config::Result<MotorStatus> setEnabled(bool enabled) override;
+    Config::Result<void> initialize(const Config::ServoConfig& config) override;
+    Config::Result<void> update(float deltaTime) override;
+    Config::Result<void> setCommand(const MotorCommand& cmd) override;
+    Config::Result<void> setEnabled(bool enabled) override;
 
     BaseMotorState getState() const override { return state_; }
     uint8_t getId() const override { return id_; }
@@ -62,9 +65,9 @@ public:
 
     void emergencyStop() override;
     void resetWatchdog() override;
-    Config::Result<MotorStatus> runSelfTest() override;
+    Config::Result<void> runSelfTest() override;
 
-    Config::Result<MotorStatus> updateConfig(const Config::ServoConfig& config) override;
+    Config::Result<void> updateConfig(const Config::ServoConfig& config) override;
     Config::ServoConfig getConfig() const override { return config_; }
 
     void setErrorCallback(std::function<void(uint8_t, MotorStatus)> callback) override {
@@ -84,6 +87,9 @@ private:
 
 // DC Motor controller implementation
 class DCMotorController : public IMotorController<Config::DCMotorConfig> {
+public:
+    using config_type = Config::DCMotorConfig;
+
 private:
     uint8_t id_;
     Config::DCMotorConfig config_;
@@ -111,10 +117,10 @@ public:
     DCMotorController(uint8_t id, HAL::HardwareManager* hwManager, HAL::TimerID timerId, uint32_t channel);
 
     // IMotorController implementation
-    Config::Result<MotorStatus> initialize(const Config::DCMotorConfig& config) override;
-    Config::Result<MotorStatus> update(float deltaTime) override;
-    Config::Result<MotorStatus> setCommand(const MotorCommand& cmd) override;
-    Config::Result<MotorStatus> setEnabled(bool enabled) override;
+    Config::Result<void> initialize(const Config::DCMotorConfig& config) override;
+    Config::Result<void> update(float deltaTime) override;
+    Config::Result<void> setCommand(const MotorCommand& cmd) override;
+    Config::Result<void> setEnabled(bool enabled) override;
 
     BaseMotorState getState() const override { return state_; }
     uint8_t getId() const override { return id_; }
@@ -122,9 +128,9 @@ public:
 
     void emergencyStop() override;
     void resetWatchdog() override;
-    Config::Result<MotorStatus> runSelfTest() override;
+    Config::Result<void> runSelfTest() override;
 
-    Config::Result<MotorStatus> updateConfig(const Config::DCMotorConfig& config) override;
+    Config::Result<void> updateConfig(const Config::DCMotorConfig& config) override;
     Config::DCMotorConfig getConfig() const override { return config_; }
 
     void setErrorCallback(std::function<void(uint8_t, MotorStatus)> callback) override {
@@ -144,6 +150,9 @@ private:
 
 // RoboMaster motor controller implementation (placeholder)
 class RoboMasterMotorController : public IMotorController<Config::RoboMasterConfig> {
+public:
+    using config_type = Config::RoboMasterConfig;
+
 private:
     uint8_t id_;
     Config::RoboMasterConfig config_;
@@ -158,10 +167,10 @@ public:
     RoboMasterMotorController(uint8_t id, HAL::HardwareManager* hwManager);
 
     // IMotorController implementation
-    Config::Result<MotorStatus> initialize(const Config::RoboMasterConfig& config) override;
-    Config::Result<MotorStatus> update(float deltaTime) override;
-    Config::Result<MotorStatus> setCommand(const MotorCommand& cmd) override;
-    Config::Result<MotorStatus> setEnabled(bool enabled) override;
+    Config::Result<void> initialize(const Config::RoboMasterConfig& config) override;
+    Config::Result<void> update(float deltaTime) override;
+    Config::Result<void> setCommand(const MotorCommand& cmd) override;
+    Config::Result<void> setEnabled(bool enabled) override;
 
     BaseMotorState getState() const override { return state_; }
     uint8_t getId() const override { return id_; }
@@ -169,9 +178,9 @@ public:
 
     void emergencyStop() override;
     void resetWatchdog() override;
-    Config::Result<MotorStatus> runSelfTest() override;
+    Config::Result<void> runSelfTest() override;
 
-    Config::Result<MotorStatus> updateConfig(const Config::RoboMasterConfig& config) override;
+    Config::Result<void> updateConfig(const Config::RoboMasterConfig& config) override;
     Config::RoboMasterConfig getConfig() const override { return config_; }
 
     void setErrorCallback(std::function<void(uint8_t, MotorStatus)> callback) override {
