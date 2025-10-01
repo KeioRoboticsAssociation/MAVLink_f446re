@@ -1,4 +1,5 @@
 #include "error_recovery.hpp"
+#include <cstdio>
 
 extern "C" {
 #include "main.h" // For HAL_GetTick()

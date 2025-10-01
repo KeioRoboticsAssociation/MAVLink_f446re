@@ -82,6 +82,7 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     App/hal
     App/motors
     App/comm
+    App/storage
     App/safety
     # Legacy includes
     Inc

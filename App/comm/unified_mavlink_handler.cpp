@@ -25,13 +25,13 @@ UnifiedMAVLinkHandler::UnifiedMAVLinkHandler(HAL::HardwareManager* hwManager, Mo
 
     // Create and register specialized dispatchers
     motorCommandDispatcher_ = std::make_unique<MotorCommandDispatcher>(motorRegistry);
-    parameterDispatcher_ = std::make_unique<ParameterDispatcher>(systemId_, componentId_, sendCallback);
+    parameterDispatcher_ = std::make_unique<ParameterDispatcher>(systemId_, componentId_, sendCallback, &Storage::g_parameter_storage);
     telemetryDispatcher_ = std::make_unique<TelemetryDispatcher>(motorRegistry, systemId_, componentId_, sendCallback);
 
     // Register copies of dispatchers with main message dispatcher
     // Note: We keep ownership of the specialized dispatchers for direct access
     messageDispatcher_->registerHandler(std::make_unique<MotorCommandDispatcher>(motorRegistry));
-    messageDispatcher_->registerHandler(std::make_unique<ParameterDispatcher>(systemId_, componentId_, sendCallback));
+    messageDispatcher_->registerHandler(std::make_unique<ParameterDispatcher>(systemId_, componentId_, sendCallback, &Storage::g_parameter_storage));
 }
 
 UnifiedMAVLinkHandler::~UnifiedMAVLinkHandler() = default;

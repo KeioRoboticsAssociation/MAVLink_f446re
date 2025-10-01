@@ -1,4 +1,5 @@
 #include "message_dispatcher.hpp"
+#include "../storage/parameter_storage.hpp"
 #include "../config/robot_config.hpp"
 
 extern "C" {
@@ -209,27 +210,53 @@ Motors::MotorCommand MotorCommandDispatcher::createMotorCommand(uint8_t motorId,
 
 // ParameterDispatcher implementation
 ParameterDispatcher::ParameterDispatcher(uint8_t systemId, uint8_t componentId,
-                                       std::function<Config::Result<Config::ErrorCode>(const mavlink_message_t&)> sendCallback)
-    : systemId_(systemId), componentId_(componentId), sendCallback_(sendCallback) {
+                                       std::function<Config::Result<Config::ErrorCode>(const mavlink_message_t&)> sendCallback,
+                                       Storage::ParameterStorage* storage)
+    : systemId_(systemId), componentId_(componentId), sendCallback_(sendCallback),
+      persistentStorage_(storage), storageEnabled_(false) {
+
+    // Initialize persistent storage
+    auto storage_result = initializeStorage();
+    storageEnabled_ = storage_result.isOk();
 
     // Register default system parameters
     registerParameter("SYS_ID", systemId, MAV_PARAM_TYPE_UINT8);
     registerParameter("COMP_ID", componentId, MAV_PARAM_TYPE_UINT8);
     registerParameter("HEARTBEAT_RATE", 1.0f, MAV_PARAM_TYPE_REAL32);
     registerParameter("TELEMETRY_RATE", 10.0f, MAV_PARAM_TYPE_REAL32);
+    registerParameter("AUTO_SAVE", 1.0f, MAV_PARAM_TYPE_UINT8);
+
+    // Load saved parameters if storage is available
+    if (storageEnabled_) {
+        loadParameters();
+    }
 }
 
 void ParameterDispatcher::registerParameter(const std::string& name, float defaultValue, uint8_t type,
                                           std::function<void(float)> setter,
-                                          std::function<float()> getter) {
+                                          std::function<float()> getter,
+                                          bool persistent) {
     Parameter param;
     param.name = name;
     param.value = defaultValue;
     param.type = type;
     param.setter = setter;
     param.getter = getter;
+    param.persistent = persistent;
 
     parameters_[name] = param;
+
+    // Register with persistent storage if enabled and parameter is persistent
+    if (storageEnabled_ && persistent && persistentStorage_) {
+        auto storage_result = persistentStorage_->registerParameterWithCallbacks(
+            name.c_str(), defaultValue, setter, getter, type
+        );
+        if (storage_result.isError()) {
+            // Fallback to non-persistent if storage registration fails
+            param.persistent = false;
+            parameters_[name] = param;
+        }
+    }
 }
 
 void ParameterDispatcher::setParameterValue(const std::string& name, float value) {
@@ -238,6 +265,11 @@ void ParameterDispatcher::setParameterValue(const std::string& name, float value
         it->second.value = value;
         if (it->second.setter) {
             it->second.setter(value);
+        }
+
+        // Update persistent storage if enabled and parameter is persistent
+        if (storageEnabled_ && it->second.persistent && persistentStorage_) {
+            updateStorageParameter(name, value);
         }
     }
 }
@@ -248,6 +280,15 @@ float ParameterDispatcher::getParameterValue(const std::string& name) const {
         if (it->second.getter) {
             return it->second.getter();
         }
+
+        // Try to get from persistent storage if parameter is persistent
+        if (storageEnabled_ && it->second.persistent && persistentStorage_) {
+            auto storage_result = persistentStorage_->getParameter(name.c_str());
+            if (storage_result.isSuccess()) {
+                return storage_result.value;
+            }
+        }
+
         return it->second.value;
     }
     return 0.0f;
@@ -331,6 +372,111 @@ Config::Result<Config::ErrorCode> ParameterDispatcher::sendParameterValue(const 
     }
 
     return Config::ErrorCode::OK;
+}
+
+// New storage-related methods for ParameterDispatcher
+
+Config::Result<Config::ErrorCode> ParameterDispatcher::saveParameters() {
+    if (!storageEnabled_ || !persistentStorage_) {
+        return Config::ErrorCode::NOT_INITIALIZED;
+    }
+
+    auto storage_result = persistentStorage_->saveParameters();
+    return storage_result.isSuccess() ? Config::ErrorCode::OK : Config::ErrorCode::CONFIG_ERROR;
+}
+
+Config::Result<Config::ErrorCode> ParameterDispatcher::loadParameters() {
+    if (!storageEnabled_ || !persistentStorage_) {
+        return Config::ErrorCode::NOT_INITIALIZED;
+    }
+
+    auto storage_result = persistentStorage_->loadParameters();
+    if (storage_result.isSuccess()) {
+        syncWithStorage();
+        return Config::ErrorCode::OK;
+    }
+    return Config::ErrorCode::CONFIG_ERROR;
+}
+
+Config::Result<Config::ErrorCode> ParameterDispatcher::factoryReset() {
+    if (!storageEnabled_ || !persistentStorage_) {
+        return Config::ErrorCode::NOT_INITIALIZED;
+    }
+
+    auto storage_result = persistentStorage_->factoryReset();
+    if (storage_result.isSuccess()) {
+        // Reset local parameters to defaults
+        for (auto& pair : parameters_) {
+            if (pair.second.persistent) {
+                auto storage_result = persistentStorage_->getParameter(pair.first.c_str());
+                if (storage_result.isSuccess()) {
+                    pair.second.value = storage_result.value;
+                }
+            }
+        }
+        return Config::ErrorCode::OK;
+    }
+    return Config::ErrorCode::CONFIG_ERROR;
+}
+
+uint16_t ParameterDispatcher::getParameterCount() const {
+    if (storageEnabled_ && persistentStorage_) {
+        auto storage_result = persistentStorage_->getParameterCount();
+        return storage_result.isSuccess() ? storage_result.value : static_cast<uint16_t>(parameters_.size());
+    }
+    return static_cast<uint16_t>(parameters_.size());
+}
+
+float ParameterDispatcher::getStorageHealth() const {
+    if (storageEnabled_ && persistentStorage_) {
+        auto storage_result = persistentStorage_->getStorageHealth();
+        return storage_result.isSuccess() ? storage_result.value : -1.0f;
+    }
+    return -1.0f;
+}
+
+Config::Result<Config::ErrorCode> ParameterDispatcher::update() {
+    if (storageEnabled_ && persistentStorage_) {
+        auto storage_result = persistentStorage_->update();
+        return storage_result.isSuccess() ? Config::ErrorCode::OK : Config::ErrorCode::CONFIG_ERROR;
+    }
+    return Config::ErrorCode::OK;
+}
+
+Config::Result<Config::ErrorCode> ParameterDispatcher::initializeStorage() {
+    if (!persistentStorage_) {
+        return Config::ErrorCode::NOT_INITIALIZED;
+    }
+
+    auto storage_result = persistentStorage_->initialize();
+    return storage_result.isSuccess() ? Config::ErrorCode::OK : Config::ErrorCode::CONFIG_ERROR;
+}
+
+Config::Result<Config::ErrorCode> ParameterDispatcher::syncWithStorage() {
+    if (!storageEnabled_ || !persistentStorage_) {
+        return Config::ErrorCode::NOT_INITIALIZED;
+    }
+
+    // Sync all persistent parameters from storage to local cache
+    for (auto& pair : parameters_) {
+        if (pair.second.persistent) {
+            auto storage_result = persistentStorage_->getParameter(pair.first.c_str());
+            if (storage_result.isSuccess()) {
+                pair.second.value = storage_result.value;
+            }
+        }
+    }
+
+    return Config::ErrorCode::OK;
+}
+
+void ParameterDispatcher::updateStorageParameter(const std::string& name, float value) {
+    if (storageEnabled_ && persistentStorage_) {
+        auto storage_result = persistentStorage_->setParameter(name.c_str(), value);
+        if (storage_result.isError()) {
+            // Handle error silently or log it
+        }
+    }
 }
 
 // TelemetryDispatcher implementation

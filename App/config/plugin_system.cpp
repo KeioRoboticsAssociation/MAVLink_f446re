@@ -1,4 +1,5 @@
 #include "plugin_system.hpp"
+#include "../comm/message_dispatcher.hpp"
 #include <cstring>
 
 extern "C" {

@@ -3,11 +3,17 @@
 #include "system_config.hpp"
 #include "error_recovery.hpp"
 #include "../motors/base/motor_interface.hpp"
-#include "../comm/message_dispatcher.hpp"
 #include <cstdint>
 #include <functional>
 #include <array>
 #include <string>
+
+#include <memory>
+
+// Forward declaration outside namespace to avoid conflicts
+namespace Communication {
+    class IMessageHandler;
+}
 
 namespace Config {
 
@@ -83,7 +89,7 @@ public:
 // Message handler plugin interface
 class IMessageHandlerPlugin : public IPlugin {
 public:
-    virtual std::unique_ptr<Communication::IMessageHandler> createHandler() = 0;
+    virtual std::unique_ptr<::Communication::IMessageHandler> createHandler() = 0;
     virtual bool supportsMessageType(uint32_t messageId) const = 0;
     virtual uint8_t getPriority() const = 0;
 };

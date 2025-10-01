@@ -11,6 +11,12 @@ extern "C" {
 #include <unordered_map>
 #include <vector>
 
+// Forward declarations
+namespace Storage {
+    class ParameterStorage;
+    extern ParameterStorage g_parameter_storage;
+}
+
 namespace Communication {
 
 // Message handler interface
@@ -49,7 +55,7 @@ private:
     Motors::MotorCommand createMotorCommand(uint8_t motorId, float value, Motors::ControlMode mode);
 };
 
-// Parameter dispatcher - handles parameter requests
+// Parameter dispatcher - handles parameter requests with persistent storage
 class ParameterDispatcher : public IMessageHandler {
 private:
     struct Parameter {
@@ -58,28 +64,46 @@ private:
         uint8_t type;
         std::function<void(float)> setter;
         std::function<float()> getter;
+        bool persistent;  // Whether this parameter should be stored persistently
     };
 
     std::unordered_map<std::string, Parameter> parameters_;
     uint8_t systemId_;
     uint8_t componentId_;
     std::function<Config::Result<Config::ErrorCode>(const mavlink_message_t&)> sendCallback_;
+    Storage::ParameterStorage* persistentStorage_;
+    bool storageEnabled_;
 
 public:
     ParameterDispatcher(uint8_t systemId, uint8_t componentId,
-                       std::function<Config::Result<Config::ErrorCode>(const mavlink_message_t&)> sendCallback);
+                       std::function<Config::Result<Config::ErrorCode>(const mavlink_message_t&)> sendCallback,
+                       Storage::ParameterStorage* storage = &Storage::g_parameter_storage);
 
     // Parameter management
     void registerParameter(const std::string& name, float defaultValue, uint8_t type,
                           std::function<void(float)> setter = nullptr,
-                          std::function<float()> getter = nullptr);
+                          std::function<float()> getter = nullptr,
+                          bool persistent = true);
 
     void setParameterValue(const std::string& name, float value);
     float getParameterValue(const std::string& name) const;
 
+    // Persistent storage operations
+    Config::Result<Config::ErrorCode> saveParameters();
+    Config::Result<Config::ErrorCode> loadParameters();
+    Config::Result<Config::ErrorCode> factoryReset();
+
+    // Storage status
+    bool isStorageEnabled() const { return storageEnabled_; }
+    uint16_t getParameterCount() const;
+    float getStorageHealth() const;
+
     // IMessageHandler implementation
     Config::Result<Config::ErrorCode> handleMessage(const mavlink_message_t& msg) override;
     bool canHandle(uint32_t msgId) const override;
+
+    // Update method for periodic storage maintenance
+    Config::Result<Config::ErrorCode> update();
 
 private:
     Config::Result<Config::ErrorCode> handleParameterRequestList(const mavlink_message_t& msg);
@@ -87,6 +111,11 @@ private:
     Config::Result<Config::ErrorCode> handleParameterSet(const mavlink_message_t& msg);
 
     Config::Result<Config::ErrorCode> sendParameterValue(const std::string& name, uint16_t index = 0);
+
+    // Storage integration helpers
+    Config::Result<Config::ErrorCode> initializeStorage();
+    Config::Result<Config::ErrorCode> syncWithStorage();
+    void updateStorageParameter(const std::string& name, float value);
 };
 
 // Telemetry dispatcher - handles telemetry generation and transmission
