@@ -26,6 +26,9 @@ struct BaseMotorState {
     uint32_t timeoutCount = 0;
 };
 
+// Alias for compatibility
+using MotorState = BaseMotorState;
+
 // Motor control modes
 enum class ControlMode : uint8_t {
     POSITION = 0,

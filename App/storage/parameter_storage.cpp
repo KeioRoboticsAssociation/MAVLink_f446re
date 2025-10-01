@@ -17,7 +17,8 @@ ParameterStorage::ParameterStorage(FlashStorage* flash_storage)
       active_block_address_(Memory::PRIMARY_BLOCK_ADDR),
       backup_block_address_(Memory::SECONDARY_BLOCK_ADDR),
       current_sequence_number_(0), last_save_time_(0),
-      initialized_(false), auto_save_enabled_(Config::ENABLE_AUTO_BACKUP) {
+      initialized_(false), auto_save_enabled_(Config::ENABLE_AUTO_BACKUP),
+      current_auth_level_(AuthorizationLevel::USER), safety_critical_enabled_(false) {
 }
 
 StorageResult<bool> ParameterStorage::initialize() {
@@ -104,9 +105,26 @@ StorageResult<bool> ParameterStorage::factoryReset() {
     return loadDefaults();
 }
 
-StorageResult<bool> ParameterStorage::setParameter(const char* name, float value, bool force_save) {
+StorageResult<ValidationResult> ParameterStorage::setParameter(const char* name, float value, bool force_save) {
+    return setParameterWithAuth(name, value, current_auth_level_, safety_critical_enabled_, force_save);
+}
+
+StorageResult<ValidationResult> ParameterStorage::setParameterWithAuth(const char* name, float value,
+                                                                     AuthorizationLevel auth_level,
+                                                                     bool allow_safety_critical,
+                                                                     bool force_save) {
     if (!name || !initialized_) {
         return StorageError::INVALID_PARAMETER;
+    }
+
+    // Validate parameter change
+    auto validation = validateParameterChange(name, value, auth_level, allow_safety_critical);
+    if (validation.isError()) {
+        return validation.error;
+    }
+
+    if (validation.value != ValidationResult::SUCCESS) {
+        return validation.value;
     }
 
     // Find parameter in cache
@@ -120,17 +138,20 @@ StorageResult<bool> ParameterStorage::setParameter(const char* name, float value
         return StorageError::INVALID_PARAMETER;
     }
 
-    // Validate new value
-    if (value < entry->stored_param.min_value || value > entry->stored_param.max_value) {
-        return StorageError::INVALID_PARAMETER;
+    float old_value = entry->stored_param.value;
+
+    // If we're in a transaction, add to pending changes
+    if (active_transaction_.active) {
+        auto add_result = addToTransaction(name, old_value, value,
+                                         entry->stored_param.requiresReboot(),
+                                         entry->stored_param.isSafetyCritical());
+        if (add_result.isError()) {
+            return add_result.error;
+        }
+        return ValidationResult::SUCCESS; // Will be applied when transaction commits
     }
 
-    // Check if read-only
-    if (entry->stored_param.isReadOnly()) {
-        return StorageError::WRITE_PROTECTED;
-    }
-
-    // Update value
+    // Update value immediately if not in transaction
     entry->stored_param.value = value;
     entry->dirty = true;
     updateAccessTime(entry);
@@ -142,10 +163,13 @@ StorageResult<bool> ParameterStorage::setParameter(const char* name, float value
 
     // Force save if requested
     if (force_save) {
-        return saveSingleParameter(name);
+        auto save_result = saveSingleParameter(name);
+        if (save_result.isError()) {
+            return save_result.error;
+        }
     }
 
-    return true;
+    return ValidationResult::SUCCESS;
 }
 
 StorageResult<float> ParameterStorage::getParameter(const char* name) {
@@ -541,6 +565,161 @@ StorageResult<bool> ParameterStorage::copyString(char* dest, const char* src, si
     std::strncpy(dest, src, max_len - 1);
     dest[max_len - 1] = '\0';
     return true;
+}
+
+// Enhanced validation and safety methods
+
+StorageResult<ValidationResult> ParameterStorage::validateParameterChange(const char* name, float value,
+                                                                        AuthorizationLevel auth_level,
+                                                                        bool allow_safety_critical) {
+    if (!name || !initialized_) {
+        return StorageError::INVALID_PARAMETER;
+    }
+
+    // Find parameter in cache
+    auto cache_entry = findInCache(name);
+    if (cache_entry.isError()) {
+        return StorageError::INVALID_PARAMETER;
+    }
+
+    ParameterCacheEntry* entry = cache_entry.value;
+    if (!entry) {
+        return StorageError::INVALID_PARAMETER;
+    }
+
+    const StoredParameter& param = entry->stored_param;
+
+    // Validate access authorization
+    auto access_result = param.validateAccess(auth_level, allow_safety_critical);
+    if (access_result != ValidationResult::SUCCESS) {
+        return access_result;
+    }
+
+    // Validate value range
+    auto value_result = param.validateValue(value);
+    if (value_result != ValidationResult::SUCCESS) {
+        return value_result;
+    }
+
+    return ValidationResult::SUCCESS;
+}
+
+StorageResult<uint32_t> ParameterStorage::beginTransaction() {
+    if (active_transaction_.active) {
+        return StorageError::INVALID_PARAMETER; // Already in transaction
+    }
+
+    active_transaction_.active = true;
+    active_transaction_.change_count = 0;
+    active_transaction_.transaction_id = ++current_sequence_number_;
+
+    return active_transaction_.transaction_id;
+}
+
+StorageResult<bool> ParameterStorage::commitTransaction(uint32_t transaction_id) {
+    if (!active_transaction_.active || active_transaction_.transaction_id != transaction_id) {
+        return StorageError::INVALID_PARAMETER;
+    }
+
+    // Apply all pending changes
+    auto apply_result = applyTransactionChanges();
+    if (apply_result.isError()) {
+        clearTransaction();
+        return apply_result.error;
+    }
+
+    clearTransaction();
+    return true;
+}
+
+StorageResult<bool> ParameterStorage::rollbackTransaction(uint32_t transaction_id) {
+    if (!active_transaction_.active || active_transaction_.transaction_id != transaction_id) {
+        return StorageError::INVALID_PARAMETER;
+    }
+
+    clearTransaction();
+    return true;
+}
+
+StorageResult<std::vector<ParameterChangeNotification>> ParameterStorage::analyzeParameterChange(const char* name, float new_value) {
+    std::vector<ParameterChangeNotification> notifications;
+
+    if (!name || !initialized_) {
+        return StorageError::INVALID_PARAMETER;
+    }
+
+    auto cache_entry = findInCache(name);
+    if (cache_entry.isError() || !cache_entry.value) {
+        return StorageError::INVALID_PARAMETER;
+    }
+
+    const StoredParameter& param = cache_entry.value->stored_param;
+
+    ParameterChangeNotification notification;
+    copyString(notification.name, name, Config::MAX_PARAM_NAME_LEN);
+    notification.old_value = param.value;
+    notification.new_value = new_value;
+    notification.requires_reboot = param.requiresReboot();
+    notification.is_safety_critical = param.isSafetyCritical();
+    notification.timestamp = getCurrentTime();
+
+    notifications.push_back(notification);
+
+    return notifications;
+}
+
+StorageResult<bool> ParameterStorage::addToTransaction(const char* name, float old_value, float new_value,
+                                                     bool requires_reboot, bool is_safety_critical) {
+    if (!active_transaction_.active) {
+        return StorageError::INVALID_PARAMETER;
+    }
+
+    if (active_transaction_.change_count >= 16) {
+        return StorageError::STORAGE_FULL;
+    }
+
+    auto& change = active_transaction_.pending_changes[active_transaction_.change_count++];
+    copyString(change.name, name, Config::MAX_PARAM_NAME_LEN);
+    change.old_value = old_value;
+    change.new_value = new_value;
+    change.requires_reboot = requires_reboot;
+    change.is_safety_critical = is_safety_critical;
+    change.timestamp = getCurrentTime();
+
+    return true;
+}
+
+StorageResult<bool> ParameterStorage::applyTransactionChanges() {
+    if (!active_transaction_.active) {
+        return StorageError::INVALID_PARAMETER;
+    }
+
+    for (uint8_t i = 0; i < active_transaction_.change_count; i++) {
+        const auto& change = active_transaction_.pending_changes[i];
+
+        auto cache_entry = findInCache(change.name);
+        if (cache_entry.isError() || !cache_entry.value) {
+            return StorageError::INVALID_PARAMETER;
+        }
+
+        ParameterCacheEntry* entry = cache_entry.value;
+        entry->stored_param.value = change.new_value;
+        entry->dirty = true;
+        updateAccessTime(entry);
+
+        // Call setter callback if available
+        if (entry->setter) {
+            entry->setter(change.new_value);
+        }
+    }
+
+    return true;
+}
+
+void ParameterStorage::clearTransaction() {
+    active_transaction_.active = false;
+    active_transaction_.change_count = 0;
+    active_transaction_.transaction_id = 0;
 }
 
 } // namespace Storage

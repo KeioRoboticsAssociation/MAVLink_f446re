@@ -11,8 +11,26 @@ extern "C" {
 #include <cstring>
 #include <array>
 #include <functional>
+#include <vector>
 
 namespace Storage {
+
+// Authorization levels for parameter access
+enum class AuthorizationLevel : uint8_t {
+    USER = 0,       // Basic user level - can modify USER_LEVEL parameters
+    ADMIN = 1,      // Administrator level - can modify USER and ADMIN level parameters
+    FACTORY = 2     // Factory level - can modify all parameters including FACTORY_LEVEL
+};
+
+// Parameter validation result
+enum class ValidationResult : uint8_t {
+    SUCCESS = 0,
+    OUT_OF_RANGE = 1,
+    INSUFFICIENT_AUTHORIZATION = 2,
+    SAFETY_CRITICAL_DENIED = 3,
+    READ_ONLY_VIOLATION = 4,
+    ATOMIC_TRANSACTION_REQUIRED = 5
+};
 
 // Stored parameter structure (packed for flash storage)
 struct __attribute__((packed)) StoredParameter {
@@ -31,6 +49,10 @@ struct __attribute__((packed)) StoredParameter {
     static constexpr uint8_t FLAG_CRITICAL = 0x02;
     static constexpr uint8_t FLAG_PERSISTENT = 0x04;
     static constexpr uint8_t FLAG_REQUIRES_REBOOT = 0x08;
+    static constexpr uint8_t FLAG_USER_LEVEL = 0x10;
+    static constexpr uint8_t FLAG_ADMIN_LEVEL = 0x20;
+    static constexpr uint8_t FLAG_FACTORY_LEVEL = 0x40;
+    static constexpr uint8_t FLAG_SAFETY_CRITICAL = 0x80;
 
     StoredParameter() {
         std::memset(this, 0, sizeof(*this));
@@ -60,9 +82,45 @@ struct __attribute__((packed)) StoredParameter {
     bool isCritical() const { return (flags & FLAG_CRITICAL) != 0; }
     bool isPersistent() const { return (flags & FLAG_PERSISTENT) != 0; }
     bool requiresReboot() const { return (flags & FLAG_REQUIRES_REBOOT) != 0; }
+    bool isUserLevel() const { return (flags & FLAG_USER_LEVEL) != 0; }
+    bool isAdminLevel() const { return (flags & FLAG_ADMIN_LEVEL) != 0; }
+    bool isFactoryLevel() const { return (flags & FLAG_FACTORY_LEVEL) != 0; }
+    bool isSafetyCritical() const { return (flags & FLAG_SAFETY_CRITICAL) != 0; }
+
+    // Authorization validation
+    AuthorizationLevel getRequiredAuthLevel() const {
+        if (flags & FLAG_FACTORY_LEVEL) return AuthorizationLevel::FACTORY;
+        if (flags & FLAG_ADMIN_LEVEL) return AuthorizationLevel::ADMIN;
+        return AuthorizationLevel::USER;
+    }
+
+    ValidationResult validateAccess(AuthorizationLevel userLevel, bool allowSafetyCritical = false) const {
+        // Check read-only access
+        if (isReadOnly()) {
+            return ValidationResult::READ_ONLY_VIOLATION;
+        }
+
+        // Check authorization level
+        if (static_cast<uint8_t>(userLevel) < static_cast<uint8_t>(getRequiredAuthLevel())) {
+            return ValidationResult::INSUFFICIENT_AUTHORIZATION;
+        }
+
+        // Check safety critical parameters
+        if (isSafetyCritical() && !allowSafetyCritical) {
+            return ValidationResult::SAFETY_CRITICAL_DENIED;
+        }
+
+        return ValidationResult::SUCCESS;
+    }
+
+    ValidationResult validateValue(float new_value) const {
+        if (new_value < min_value || new_value > max_value) {
+            return ValidationResult::OUT_OF_RANGE;
+        }
+        return ValidationResult::SUCCESS;
+    }
 
     void updateCRC() {
-        uint32_t temp_crc = crc32;
         crc32 = 0;
         auto crc_result = g_flash_storage.calculateCRC32(reinterpret_cast<const uint8_t*>(this), sizeof(*this));
         crc32 = crc_result.isSuccess() ? crc_result.value : 0;
@@ -117,9 +175,9 @@ struct __attribute__((packed)) ParameterBlockHeader {
 };
 
 // Complete parameter block for storage
-struct __attribute__((packed)) ParameterBlock {
+struct ParameterBlock {
     ParameterBlockHeader header;
-    std::array<StoredParameter, Config::MAX_PARAMETERS> parameters;
+    StoredParameter parameters[Config::MAX_PARAMETERS];
 
     ParameterBlock() = default;
 
@@ -130,7 +188,7 @@ struct __attribute__((packed)) ParameterBlock {
 
         // Verify data CRC
         auto data_crc = g_flash_storage.calculateCRC32(
-            reinterpret_cast<const uint8_t*>(parameters.data()),
+            reinterpret_cast<const uint8_t*>(parameters),
             header.param_count * sizeof(StoredParameter)
         );
 
@@ -156,7 +214,7 @@ struct __attribute__((packed)) ParameterBlock {
 
         // Update data CRC
         auto data_crc = g_flash_storage.calculateCRC32(
-            reinterpret_cast<const uint8_t*>(parameters.data()),
+            reinterpret_cast<const uint8_t*>(parameters),
             header.param_count * sizeof(StoredParameter)
         );
         header.data_crc = data_crc.isSuccess() ? data_crc.value : 0;
@@ -182,11 +240,31 @@ struct ParameterCacheEntry {
     ParameterCacheEntry() : dirty(false), loaded(false), last_access_time(0) {}
 };
 
+// Parameter change notification
+struct ParameterChangeNotification {
+    char name[Config::MAX_PARAM_NAME_LEN];
+    float old_value;
+    float new_value;
+    bool requires_reboot;
+    bool is_safety_critical;
+    uint32_t timestamp;
+};
+
+// Atomic transaction context
+struct AtomicTransaction {
+    bool active;
+    ParameterChangeNotification pending_changes[16];
+    uint8_t change_count;
+    uint32_t transaction_id;
+
+    AtomicTransaction() : active(false), change_count(0), transaction_id(0) {}
+};
+
 // High-level parameter storage manager
 class ParameterStorage {
 private:
     FlashStorage* flash_storage_;
-    std::array<ParameterCacheEntry, Config::CACHE_SIZE> cache_;
+    ParameterCacheEntry cache_[Config::CACHE_SIZE];
     uint8_t cache_size_;
     uint32_t active_block_address_;
     uint32_t backup_block_address_;
@@ -194,6 +272,9 @@ private:
     uint32_t last_save_time_;
     bool initialized_;
     bool auto_save_enabled_;
+    AuthorizationLevel current_auth_level_;
+    bool safety_critical_enabled_;
+    AtomicTransaction active_transaction_;
 
 public:
     ParameterStorage(FlashStorage* flash_storage = &g_flash_storage);
@@ -204,8 +285,12 @@ public:
     StorageResult<bool> loadDefaults();
     StorageResult<bool> factoryReset();
 
-    // Parameter operations
-    StorageResult<bool> setParameter(const char* name, float value, bool force_save = false);
+    // Parameter operations (enhanced with validation)
+    StorageResult<ValidationResult> setParameter(const char* name, float value, bool force_save = false);
+    StorageResult<ValidationResult> setParameterWithAuth(const char* name, float value,
+                                                       AuthorizationLevel auth_level,
+                                                       bool allow_safety_critical = false,
+                                                       bool force_save = false);
     StorageResult<float> getParameter(const char* name);
     StorageResult<bool> hasParameter(const char* name);
 
@@ -233,6 +318,21 @@ public:
     StorageResult<float> getStorageHealth() const;
     StorageResult<uint32_t> getLastSaveTime() const;
 
+    // Authorization management
+    void setAuthorizationLevel(AuthorizationLevel level) { current_auth_level_ = level; }
+    AuthorizationLevel getAuthorizationLevel() const { return current_auth_level_; }
+    void setSafetyCriticalEnabled(bool enabled) { safety_critical_enabled_ = enabled; }
+    bool isSafetyCriticalEnabled() const { return safety_critical_enabled_; }
+
+    // Atomic transactions
+    StorageResult<uint32_t> beginTransaction();
+    StorageResult<bool> commitTransaction(uint32_t transaction_id);
+    StorageResult<bool> rollbackTransaction(uint32_t transaction_id);
+    bool isTransactionActive() const { return active_transaction_.active; }
+
+    // Parameter impact analysis
+    StorageResult<std::vector<ParameterChangeNotification>> analyzeParameterChange(const char* name, float new_value);
+
     // Configuration
     void setAutoSave(bool enabled) { auto_save_enabled_ = enabled; }
     bool isAutoSaveEnabled() const { return auto_save_enabled_; }
@@ -256,8 +356,16 @@ private:
 
     // Validation and recovery
     StorageResult<bool> validateParameter(const StoredParameter& param);
+    StorageResult<ValidationResult> validateParameterChange(const char* name, float value,
+                                                          AuthorizationLevel auth_level,
+                                                          bool allow_safety_critical);
     StorageResult<bool> recoverFromCorruption();
     bool shouldAutoSave() const;
+
+    // Transaction helpers
+    StorageResult<bool> addToTransaction(const char* name, float old_value, float new_value, bool requires_reboot, bool is_safety_critical);
+    StorageResult<bool> applyTransactionChanges();
+    void clearTransaction();
 
     // Utility functions
     uint32_t getCurrentTime() const;

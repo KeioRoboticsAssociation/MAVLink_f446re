@@ -213,18 +213,24 @@ ParameterDispatcher::ParameterDispatcher(uint8_t systemId, uint8_t componentId,
                                        std::function<Config::Result<Config::ErrorCode>(const mavlink_message_t&)> sendCallback,
                                        Storage::ParameterStorage* storage)
     : systemId_(systemId), componentId_(componentId), sendCallback_(sendCallback),
-      persistentStorage_(storage), storageEnabled_(false) {
+      persistentStorage_(storage), storageEnabled_(false),
+      current_auth_level_(Storage::AuthorizationLevel::USER), safety_critical_enabled_(false) {
 
     // Initialize persistent storage
     auto storage_result = initializeStorage();
     storageEnabled_ = storage_result.isOk();
 
-    // Register default system parameters
-    registerParameter("SYS_ID", systemId, MAV_PARAM_TYPE_UINT8);
-    registerParameter("COMP_ID", componentId, MAV_PARAM_TYPE_UINT8);
-    registerParameter("HEARTBEAT_RATE", 1.0f, MAV_PARAM_TYPE_REAL32);
-    registerParameter("TELEMETRY_RATE", 10.0f, MAV_PARAM_TYPE_REAL32);
-    registerParameter("AUTO_SAVE", 1.0f, MAV_PARAM_TYPE_UINT8);
+    // Register default system parameters with appropriate authorization levels
+    registerParameter("SYS_ID", systemId, MAV_PARAM_TYPE_UINT8, nullptr, nullptr, true,
+                     Storage::AuthorizationLevel::ADMIN, false, 1.0f, 255.0f);
+    registerParameter("COMP_ID", componentId, MAV_PARAM_TYPE_UINT8, nullptr, nullptr, true,
+                     Storage::AuthorizationLevel::ADMIN, false, 1.0f, 255.0f);
+    registerParameter("HEARTBEAT_RATE", 1.0f, MAV_PARAM_TYPE_REAL32, nullptr, nullptr, true,
+                     Storage::AuthorizationLevel::USER, false, 0.1f, 10.0f);
+    registerParameter("TELEMETRY_RATE", 10.0f, MAV_PARAM_TYPE_REAL32, nullptr, nullptr, true,
+                     Storage::AuthorizationLevel::USER, false, 1.0f, 100.0f);
+    registerParameter("AUTO_SAVE", 1.0f, MAV_PARAM_TYPE_UINT8, nullptr, nullptr, true,
+                     Storage::AuthorizationLevel::ADMIN, false, 0.0f, 1.0f);
 
     // Load saved parameters if storage is available
     if (storageEnabled_) {
@@ -235,7 +241,11 @@ ParameterDispatcher::ParameterDispatcher(uint8_t systemId, uint8_t componentId,
 void ParameterDispatcher::registerParameter(const std::string& name, float defaultValue, uint8_t type,
                                           std::function<void(float)> setter,
                                           std::function<float()> getter,
-                                          bool persistent) {
+                                          bool persistent,
+                                          Storage::AuthorizationLevel auth_level,
+                                          bool safety_critical,
+                                          float min_value,
+                                          float max_value) {
     Parameter param;
     param.name = name;
     param.value = defaultValue;
@@ -243,6 +253,10 @@ void ParameterDispatcher::registerParameter(const std::string& name, float defau
     param.setter = setter;
     param.getter = getter;
     param.persistent = persistent;
+    param.required_auth_level = auth_level;
+    param.safety_critical = safety_critical;
+    param.min_value = min_value;
+    param.max_value = max_value;
 
     parameters_[name] = param;
 
@@ -262,6 +276,23 @@ void ParameterDispatcher::registerParameter(const std::string& name, float defau
 void ParameterDispatcher::setParameterValue(const std::string& name, float value) {
     auto it = parameters_.find(name);
     if (it != parameters_.end()) {
+        const Parameter& param = it->second;
+
+        // Validate authorization level
+        if (static_cast<uint8_t>(current_auth_level_) < static_cast<uint8_t>(param.required_auth_level)) {
+            return; // Insufficient authorization
+        }
+
+        // Check safety critical parameters
+        if (param.safety_critical && !safety_critical_enabled_) {
+            return; // Safety critical access denied
+        }
+
+        // Validate value range
+        if (value < param.min_value || value > param.max_value) {
+            return; // Out of range
+        }
+
         it->second.value = value;
         if (it->second.setter) {
             it->second.setter(value);

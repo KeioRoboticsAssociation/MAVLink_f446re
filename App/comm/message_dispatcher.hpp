@@ -2,6 +2,7 @@
 
 #include "../config/system_config.hpp"
 #include "../motors/base/motor_interface.hpp"
+#include "../storage/parameter_storage.hpp"
 
 extern "C" {
 #include "mavlink/c_library_v2/common/mavlink.h"
@@ -11,11 +12,6 @@ extern "C" {
 #include <unordered_map>
 #include <vector>
 
-// Forward declarations
-namespace Storage {
-    class ParameterStorage;
-    extern ParameterStorage g_parameter_storage;
-}
 
 namespace Communication {
 
@@ -65,6 +61,10 @@ private:
         std::function<void(float)> setter;
         std::function<float()> getter;
         bool persistent;  // Whether this parameter should be stored persistently
+        Storage::AuthorizationLevel required_auth_level;  // Required authorization level
+        bool safety_critical;  // Safety critical parameter
+        float min_value;
+        float max_value;
     };
 
     std::unordered_map<std::string, Parameter> parameters_;
@@ -73,6 +73,8 @@ private:
     std::function<Config::Result<Config::ErrorCode>(const mavlink_message_t&)> sendCallback_;
     Storage::ParameterStorage* persistentStorage_;
     bool storageEnabled_;
+    Storage::AuthorizationLevel current_auth_level_;
+    bool safety_critical_enabled_;
 
 public:
     ParameterDispatcher(uint8_t systemId, uint8_t componentId,
@@ -83,10 +85,19 @@ public:
     void registerParameter(const std::string& name, float defaultValue, uint8_t type,
                           std::function<void(float)> setter = nullptr,
                           std::function<float()> getter = nullptr,
-                          bool persistent = true);
+                          bool persistent = true,
+                          Storage::AuthorizationLevel auth_level = Storage::AuthorizationLevel::USER,
+                          bool safety_critical = false,
+                          float min_value = -1000000.0f,
+                          float max_value = 1000000.0f);
 
     void setParameterValue(const std::string& name, float value);
     float getParameterValue(const std::string& name) const;
+
+    // Authorization management
+    void setAuthorizationLevel(Storage::AuthorizationLevel level) { current_auth_level_ = level; }
+    Storage::AuthorizationLevel getAuthorizationLevel() const { return current_auth_level_; }
+    void setSafetyCriticalEnabled(bool enabled) { safety_critical_enabled_ = enabled; }
 
     // Persistent storage operations
     Config::Result<Config::ErrorCode> saveParameters();
