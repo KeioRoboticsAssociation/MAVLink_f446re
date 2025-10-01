@@ -1,3 +1,8 @@
+/**
+ * @file parameter_storage.cpp
+ * @brief Implements the high-level parameter storage manager.
+ */
+
 #include "parameter_storage.hpp"
 
 extern "C" {
@@ -9,9 +14,12 @@ extern "C" {
 
 namespace Storage {
 
-// Global instance
 ParameterStorage g_parameter_storage;
 
+/**
+ * @brief Construct a new ParameterStorage object.
+ * @param flash_storage A pointer to the flash storage driver.
+ */
 ParameterStorage::ParameterStorage(FlashStorage* flash_storage)
     : flash_storage_(flash_storage), cache_size_(0),
       active_block_address_(Memory::PRIMARY_BLOCK_ADDR),
@@ -21,28 +29,28 @@ ParameterStorage::ParameterStorage(FlashStorage* flash_storage)
       current_auth_level_(AuthorizationLevel::USER), safety_critical_enabled_(false) {
 }
 
+/**
+ * @brief Initializes the parameter storage.
+ * @return A StorageResult indicating success or failure.
+ */
 StorageResult<bool> ParameterStorage::initialize() {
     if (initialized_) {
         return true;
     }
 
-    // Initialize flash storage
     auto flash_init = flash_storage_->initialize();
     if (flash_init.isError()) {
         return flash_init.error;
     }
 
-    // Find the most recent valid parameter block
     auto valid_block_result = findValidBlock();
     if (valid_block_result.isSuccess()) {
         active_block_address_ = valid_block_result.value;
         backup_block_address_ = (active_block_address_ == Memory::PRIMARY_BLOCK_ADDR) ?
                                Memory::SECONDARY_BLOCK_ADDR : Memory::PRIMARY_BLOCK_ADDR;
 
-        // Load parameters from the valid block
         auto load_result = loadParameters();
         if (load_result.isError()) {
-            // If loading fails, try to recover or load defaults
             auto recovery_result = recoverFromCorruption();
             if (recovery_result.isError()) {
                 auto defaults_result = loadDefaults();
@@ -52,7 +60,6 @@ StorageResult<bool> ParameterStorage::initialize() {
             }
         }
     } else {
-        // No valid block found, load defaults
         auto defaults_result = loadDefaults();
         if (defaults_result.isError()) {
             return defaults_result.error;
@@ -63,12 +70,14 @@ StorageResult<bool> ParameterStorage::initialize() {
     return true;
 }
 
+/**
+ * @brief Loads the default parameters.
+ * @return A StorageResult indicating success or failure.
+ */
 StorageResult<bool> ParameterStorage::loadDefaults() {
-    // Clear cache
     cache_size_ = 0;
     current_sequence_number_ = 1;
 
-    // Register default system parameters
     auto results = {
         registerParameter("SYS_ID", 1.0f, MAV_PARAM_TYPE_UINT8, 1.0f, 255.0f),
         registerParameter("COMP_ID", 1.0f, MAV_PARAM_TYPE_UINT8, 1.0f, 255.0f),
@@ -82,155 +91,139 @@ StorageResult<bool> ParameterStorage::loadDefaults() {
             return result.error;
         }
     }
-
-    // Save defaults to flash
     return saveParameters();
 }
 
+/**
+ * @brief Resets all parameters to their factory default values.
+ * @return A StorageResult indicating success or failure.
+ */
 StorageResult<bool> ParameterStorage::factoryReset() {
-    // Clear flash blocks
     auto erase1 = flash_storage_->eraseBlock(Memory::PRIMARY_BLOCK_ADDR);
     auto erase2 = flash_storage_->eraseBlock(Memory::SECONDARY_BLOCK_ADDR);
 
     if (erase1.isError()) return erase1.error;
     if (erase2.isError()) return erase2.error;
 
-    // Reset internal state
     cache_size_ = 0;
     current_sequence_number_ = 1;
     active_block_address_ = Memory::PRIMARY_BLOCK_ADDR;
     backup_block_address_ = Memory::SECONDARY_BLOCK_ADDR;
 
-    // Load defaults
     return loadDefaults();
 }
 
+/**
+ * @brief Sets the value of a parameter.
+ * @param name The name of the parameter.
+ * @param value The new value of the parameter.
+ * @param force_save Whether to force a save to flash.
+ * @return A StorageResult containing the validation result or an error.
+ */
 StorageResult<ValidationResult> ParameterStorage::setParameter(const char* name, float value, bool force_save) {
     return setParameterWithAuth(name, value, current_auth_level_, safety_critical_enabled_, force_save);
 }
 
+/**
+ * @brief Sets the value of a parameter with a specific authorization level.
+ * @param name The name of the parameter.
+ * @param value The new value of the parameter.
+ * @param auth_level The authorization level of the user.
+ * @param allow_safety_critical Whether to allow modification of safety-critical parameters.
+ * @param force_save Whether to force a save to flash.
+ * @return A StorageResult containing the validation result or an error.
+ */
 StorageResult<ValidationResult> ParameterStorage::setParameterWithAuth(const char* name, float value,
                                                                      AuthorizationLevel auth_level,
                                                                      bool allow_safety_critical,
                                                                      bool force_save) {
-    if (!name || !initialized_) {
-        return StorageError::INVALID_PARAMETER;
-    }
+    if (!name || !initialized_) return StorageError::INVALID_PARAMETER;
 
-    // Validate parameter change
     auto validation = validateParameterChange(name, value, auth_level, allow_safety_critical);
-    if (validation.isError()) {
-        return validation.error;
-    }
+    if (validation.isError()) return validation.error;
+    if (validation.value != ValidationResult::SUCCESS) return validation.value;
 
-    if (validation.value != ValidationResult::SUCCESS) {
-        return validation.value;
-    }
-
-    // Find parameter in cache
     auto cache_entry = findInCache(name);
-    if (cache_entry.isError()) {
-        return StorageError::INVALID_PARAMETER;
-    }
+    if (cache_entry.isError()) return StorageError::INVALID_PARAMETER;
 
     ParameterCacheEntry* entry = cache_entry.value;
-    if (!entry) {
-        return StorageError::INVALID_PARAMETER;
-    }
+    if (!entry) return StorageError::INVALID_PARAMETER;
 
-    float old_value = entry->stored_param.value;
-
-    // If we're in a transaction, add to pending changes
     if (active_transaction_.active) {
-        auto add_result = addToTransaction(name, old_value, value,
+        auto add_result = addToTransaction(name, entry->stored_param.value, value,
                                          entry->stored_param.requiresReboot(),
                                          entry->stored_param.isSafetyCritical());
-        if (add_result.isError()) {
-            return add_result.error;
-        }
-        return ValidationResult::SUCCESS; // Will be applied when transaction commits
+        if (add_result.isError()) return add_result.error;
+        return ValidationResult::SUCCESS;
     }
 
-    // Update value immediately if not in transaction
     entry->stored_param.value = value;
     entry->dirty = true;
     updateAccessTime(entry);
 
-    // Call setter callback if available
-    if (entry->setter) {
-        entry->setter(value);
-    }
-
-    // Force save if requested
+    if (entry->setter) entry->setter(value);
     if (force_save) {
         auto save_result = saveSingleParameter(name);
-        if (save_result.isError()) {
-            return save_result.error;
-        }
+        if (save_result.isError()) return save_result.error;
     }
 
     return ValidationResult::SUCCESS;
 }
 
+/**
+ * @brief Gets the value of a parameter.
+ * @param name The name of the parameter.
+ * @return A StorageResult containing the parameter value or an error.
+ */
 StorageResult<float> ParameterStorage::getParameter(const char* name) {
-    if (!name || !initialized_) {
-        return StorageError::INVALID_PARAMETER;
-    }
-
+    if (!name || !initialized_) return StorageError::INVALID_PARAMETER;
     auto cache_entry = findInCache(name);
-    if (cache_entry.isError()) {
-        return StorageError::INVALID_PARAMETER;
-    }
-
+    if (cache_entry.isError()) return StorageError::INVALID_PARAMETER;
     ParameterCacheEntry* entry = cache_entry.value;
-    if (!entry) {
-        return StorageError::INVALID_PARAMETER;
-    }
-
+    if (!entry) return StorageError::INVALID_PARAMETER;
     updateAccessTime(entry);
-
-    // Use getter callback if available
     if (entry->getter) {
         float current_value = entry->getter();
-        // Update cached value if it changed
         if (current_value != entry->stored_param.value) {
             entry->stored_param.value = current_value;
             entry->dirty = true;
         }
         return current_value;
     }
-
     return entry->stored_param.value;
 }
 
+/**
+ * @brief Checks if a parameter exists.
+ * @param name The name of the parameter.
+ * @return A StorageResult containing true if the parameter exists, false otherwise, or an error.
+ */
 StorageResult<bool> ParameterStorage::hasParameter(const char* name) {
-    if (!name || !initialized_) {
-        return StorageError::INVALID_PARAMETER;
-    }
-
+    if (!name || !initialized_) return StorageError::INVALID_PARAMETER;
     auto cache_entry = findInCache(name);
     return cache_entry.isSuccess() && cache_entry.value != nullptr;
 }
 
+/**
+ * @brief Registers a new parameter.
+ * @param name The name of the parameter.
+ * @param default_value The default value of the parameter.
+ * @param type The MAVLink parameter type.
+ * @param min_val The minimum allowed value.
+ * @param max_val The maximum allowed value.
+ * @param flags Parameter flags.
+ * @return A StorageResult indicating success or failure.
+ */
 StorageResult<bool> ParameterStorage::registerParameter(const char* name, float default_value,
                                                       uint8_t type, float min_val, float max_val,
                                                       uint8_t flags) {
-    if (!name || cache_size_ >= Config::CACHE_SIZE) {
-        return StorageError::INVALID_PARAMETER;
-    }
-
-    // Check if parameter already exists
+    if (!name || cache_size_ >= Config::CACHE_SIZE) return StorageError::INVALID_PARAMETER;
     auto existing = findInCache(name);
-    if (existing.isSuccess() && existing.value != nullptr) {
-        return true; // Already registered
-    }
+    if (existing.isSuccess() && existing.value != nullptr) return true;
 
-    // Create new parameter
     StoredParameter param;
     auto copy_result = copyString(param.name, name, Config::MAX_PARAM_NAME_LEN);
-    if (copy_result.isError()) {
-        return copy_result.error;
-    }
+    if (copy_result.isError()) return copy_result.error;
 
     param.value = default_value;
     param.default_value = default_value;
@@ -240,53 +233,53 @@ StorageResult<bool> ParameterStorage::registerParameter(const char* name, float 
     param.flags = flags;
     param.updateCRC();
 
-    // Validate parameter
     auto validation = validateParameter(param);
-    if (validation.isError()) {
-        return validation.error;
-    }
-
-    // Add to cache
+    if (validation.isError()) return validation.error;
     auto cache_result = addToCache(param);
-    if (cache_result.isError()) {
-        return cache_result.error;
-    }
-
+    if (cache_result.isError()) return cache_result.error;
     return true;
 }
 
+/**
+ * @brief Registers a new parameter with callbacks.
+ * @param name The name of the parameter.
+ * @param default_value The default value of the parameter.
+ * @param setter A callback function to call when the parameter is set.
+ * @param getter A callback function to call when the parameter is read.
+ * @param type The MAVLink parameter type.
+ * @param min_val The minimum allowed value.
+ * @param max_val The maximum allowed value.
+ * @param flags Parameter flags.
+ * @return A StorageResult indicating success or failure.
+ */
 StorageResult<bool> ParameterStorage::registerParameterWithCallbacks(
     const char* name, float default_value,
     std::function<void(float)> setter, std::function<float()> getter,
     uint8_t type, float min_val, float max_val, uint8_t flags) {
 
     auto reg_result = registerParameter(name, default_value, type, min_val, max_val, flags);
-    if (reg_result.isError()) {
-        return reg_result.error;
-    }
+    if (reg_result.isError()) return reg_result.error;
 
-    // Add callbacks
     auto cache_entry = findInCache(name);
     if (cache_entry.isSuccess() && cache_entry.value) {
         cache_entry.value->setter = setter;
         cache_entry.value->getter = getter;
     }
-
     return true;
 }
 
+/**
+ * @brief Saves all dirty parameters to flash.
+ * @return A StorageResult indicating success or failure.
+ */
 StorageResult<bool> ParameterStorage::saveParameters() {
-    if (!initialized_) {
-        return StorageError::FLASH_ERROR;
-    }
+    if (!initialized_) return StorageError::FLASH_ERROR;
 
-    // Create parameter block
     ParameterBlock block;
     block.header.param_count = cache_size_;
     block.header.timestamp = getCurrentTime();
     block.header.sequence_number = ++current_sequence_number_;
 
-    // Copy parameters from cache
     for (uint8_t i = 0; i < cache_size_; i++) {
         if (cache_[i].loaded) {
             block.parameters[i] = cache_[i].stored_param;
@@ -294,50 +287,30 @@ StorageResult<bool> ParameterStorage::saveParameters() {
         }
     }
 
-    // Update CRCs
     block.updateCRCs();
-
-    // Switch to backup block for wear leveling
     auto switch_result = switchBlocks();
-    if (switch_result.isError()) {
-        return switch_result.error;
-    }
-
-    // Erase and write new block
+    if (switch_result.isError()) return switch_result.error;
     auto erase_result = flash_storage_->eraseBlock(active_block_address_);
-    if (erase_result.isError()) {
-        return erase_result.error;
-    }
-
+    if (erase_result.isError()) return erase_result.error;
     auto save_result = saveBlock(block, active_block_address_);
-    if (save_result.isError()) {
-        return save_result.error;
-    }
-
+    if (save_result.isError()) return save_result.error;
     last_save_time_ = getCurrentTime();
     return true;
 }
 
+/**
+ * @brief Loads all parameters from flash.
+ * @return A StorageResult indicating success or failure.
+ */
 StorageResult<bool> ParameterStorage::loadParameters() {
-    if (!initialized_) {
-        return StorageError::FLASH_ERROR;
-    }
-
+    if (!initialized_) return StorageError::FLASH_ERROR;
     auto block_result = loadBlock(active_block_address_);
-    if (block_result.isError()) {
-        return block_result.error;
-    }
-
+    if (block_result.isError()) return block_result.error;
     const ParameterBlock& block = block_result.value;
     current_sequence_number_ = block.header.sequence_number;
-
-    // Load parameters into cache
     cache_size_ = 0;
     for (uint16_t i = 0; i < block.header.param_count && i < Config::MAX_PARAMETERS; i++) {
-        if (cache_size_ >= Config::CACHE_SIZE) {
-            break;
-        }
-
+        if (cache_size_ >= Config::CACHE_SIZE) break;
         const StoredParameter& param = block.parameters[i];
         if (param.isValid() && param.verifyCRC()) {
             cache_[cache_size_].stored_param = param;
@@ -347,169 +320,143 @@ StorageResult<bool> ParameterStorage::loadParameters() {
             cache_size_++;
         }
     }
-
     return true;
 }
 
+/**
+ * @brief Saves a single parameter to flash.
+ * @param name The name of the parameter to save.
+ * @return A StorageResult indicating success or failure.
+ */
 StorageResult<bool> ParameterStorage::saveSingleParameter(const char* name) {
-    // For simplicity, save all parameters
-    // In a production system, you might implement delta saves
     return saveParameters();
 }
 
+/**
+ * @brief Gets the number of registered parameters.
+ * @return A StorageResult containing the parameter count or an error.
+ */
 StorageResult<uint16_t> ParameterStorage::getParameterCount() const {
     return cache_size_;
 }
 
+/**
+ * @brief Checks if any parameters are dirty (modified but not saved).
+ * @return A StorageResult containing true if any parameters are dirty, false otherwise, or an error.
+ */
 StorageResult<bool> ParameterStorage::isDirty() const {
     for (uint8_t i = 0; i < cache_size_; i++) {
-        if (cache_[i].dirty) {
-            return true;
-        }
+        if (cache_[i].dirty) return true;
     }
     return false;
 }
 
+/**
+ * @brief Gets the health of the flash storage.
+ * @return A StorageResult containing the storage health as a percentage or an error.
+ */
 StorageResult<float> ParameterStorage::getStorageHealth() const {
-    if (!flash_storage_) {
-        return StorageError::FLASH_ERROR;
-    }
-
+    if (!flash_storage_) return StorageError::FLASH_ERROR;
     return flash_storage_->getWearLevel();
 }
 
+/**
+ * @brief Gets the timestamp of the last save operation.
+ * @return A StorageResult containing the timestamp or an error.
+ */
 StorageResult<uint32_t> ParameterStorage::getLastSaveTime() const {
     return last_save_time_;
 }
 
+/**
+ * @brief Updates the parameter storage, performing periodic tasks like auto-saving.
+ * @return A StorageResult indicating success or failure.
+ */
 StorageResult<bool> ParameterStorage::update() {
-    if (!initialized_) {
-        return StorageError::FLASH_ERROR;
-    }
-
-    // Check for auto-save
-    if (shouldAutoSave()) {
-        return saveParameters();
-    }
-
+    if (!initialized_) return StorageError::FLASH_ERROR;
+    if (shouldAutoSave()) return saveParameters();
     return true;
 }
 
+/**
+ * @brief Compacts the parameter storage.
+ * @return A StorageResult indicating success or failure.
+ */
 StorageResult<bool> ParameterStorage::compact() {
-    // For current implementation, compaction is the same as saving
     return saveParameters();
 }
 
-// Private methods
-
 StorageResult<ParameterCacheEntry*> ParameterStorage::findInCache(const char* name) {
-    if (!name) {
-        return StorageError::INVALID_PARAMETER;
-    }
-
+    if (!name) return StorageError::INVALID_PARAMETER;
     for (uint8_t i = 0; i < cache_size_; i++) {
         if (cache_[i].loaded && std::strncmp(cache_[i].stored_param.name, name, Config::MAX_PARAM_NAME_LEN) == 0) {
             return &cache_[i];
         }
     }
-
     return static_cast<ParameterCacheEntry*>(nullptr);
 }
 
 StorageResult<ParameterCacheEntry*> ParameterStorage::addToCache(const StoredParameter& param) {
     if (cache_size_ >= Config::CACHE_SIZE) {
         auto evict_result = evictLRU();
-        if (evict_result.isError()) {
-            return evict_result.error;
-        }
+        if (evict_result.isError()) return evict_result.error;
     }
-
     cache_[cache_size_].stored_param = param;
     cache_[cache_size_].dirty = true;
     cache_[cache_size_].loaded = true;
     cache_[cache_size_].last_access_time = getCurrentTime();
-
     return &cache_[cache_size_++];
 }
 
 StorageResult<bool> ParameterStorage::evictLRU() {
-    if (cache_size_ == 0) {
-        return StorageError::STORAGE_FULL;
-    }
-
-    // Find least recently used entry
+    if (cache_size_ == 0) return StorageError::STORAGE_FULL;
     uint8_t lru_index = 0;
     uint32_t oldest_time = cache_[0].last_access_time;
-
     for (uint8_t i = 1; i < cache_size_; i++) {
         if (cache_[i].last_access_time < oldest_time) {
             oldest_time = cache_[i].last_access_time;
             lru_index = i;
         }
     }
-
-    // Save if dirty
     if (cache_[lru_index].dirty) {
-        // In a full implementation, you'd save just this parameter
-        // For simplicity, we'll mark it as not dirty
         cache_[lru_index].dirty = false;
     }
-
-    // Move last entry to evicted position
     if (lru_index < cache_size_ - 1) {
         cache_[lru_index] = cache_[cache_size_ - 1];
     }
-
     cache_size_--;
     return true;
 }
 
 void ParameterStorage::updateAccessTime(ParameterCacheEntry* entry) {
-    if (entry) {
-        entry->last_access_time = getCurrentTime();
-    }
+    if (entry) entry->last_access_time = getCurrentTime();
 }
 
 StorageResult<bool> ParameterStorage::saveBlock(const ParameterBlock& block, uint32_t address) {
-    size_t block_size = block.getStorageSize();
-    return flash_storage_->writeBlockData(address, reinterpret_cast<const uint8_t*>(&block), block_size);
+    return flash_storage_->writeBlockData(address, reinterpret_cast<const uint8_t*>(&block), block.getStorageSize());
 }
 
 StorageResult<ParameterBlock> ParameterStorage::loadBlock(uint32_t address) {
     ParameterBlock block;
     auto read_result = flash_storage_->readBlockData(address, reinterpret_cast<uint8_t*>(&block), sizeof(block));
-
-    if (read_result.isError()) {
-        return read_result.error;
-    }
-
-    if (!block.isValid()) {
-        return StorageError::CORRUPTION_DETECTED;
-    }
-
+    if (read_result.isError()) return read_result.error;
+    if (!block.isValid()) return StorageError::CORRUPTION_DETECTED;
     return block;
 }
 
 StorageResult<uint32_t> ParameterStorage::findValidBlock() {
     auto primary_block = loadBlock(Memory::PRIMARY_BLOCK_ADDR);
     auto secondary_block = loadBlock(Memory::SECONDARY_BLOCK_ADDR);
-
     bool primary_valid = primary_block.isSuccess();
     bool secondary_valid = secondary_block.isSuccess();
-
     if (primary_valid && secondary_valid) {
-        // Choose the one with higher sequence number
-        if (primary_block.value.header.sequence_number >= secondary_block.value.header.sequence_number) {
-            return Memory::PRIMARY_BLOCK_ADDR;
-        } else {
-            return Memory::SECONDARY_BLOCK_ADDR;
-        }
+        return (primary_block.value.header.sequence_number >= secondary_block.value.header.sequence_number) ?
+               Memory::PRIMARY_BLOCK_ADDR : Memory::SECONDARY_BLOCK_ADDR;
     } else if (primary_valid) {
         return Memory::PRIMARY_BLOCK_ADDR;
     } else if (secondary_valid) {
         return Memory::SECONDARY_BLOCK_ADDR;
     }
-
     return StorageError::CORRUPTION_DETECTED;
 }
 
@@ -525,27 +472,21 @@ StorageResult<bool> ParameterStorage::validateParameter(const StoredParameter& p
 }
 
 StorageResult<bool> ParameterStorage::recoverFromCorruption() {
-    // Try to load from backup block
     uint32_t backup_addr = (active_block_address_ == Memory::PRIMARY_BLOCK_ADDR) ?
                           Memory::SECONDARY_BLOCK_ADDR : Memory::PRIMARY_BLOCK_ADDR;
-
     auto backup_result = loadBlock(backup_addr);
     if (backup_result.isSuccess()) {
         active_block_address_ = backup_addr;
         return loadParameters();
     }
-
-    // Both blocks corrupted, load defaults
     return loadDefaults();
 }
 
 bool ParameterStorage::shouldAutoSave() const {
-    if (!auto_save_enabled_ || !isDirty().value) {
-        return false;
-    }
-
-    uint32_t current_time = getCurrentTime();
-    return (current_time - last_save_time_) >= Config::BACKUP_INTERVAL_MS;
+    if (!auto_save_enabled_) return false;
+    auto dirty_result = isDirty();
+    if (dirty_result.isError() || !dirty_result.value) return false;
+    return (getCurrentTime() - last_save_time_) >= Config::BACKUP_INTERVAL_MS;
 }
 
 uint32_t ParameterStorage::getCurrentTime() const {
@@ -553,66 +494,35 @@ uint32_t ParameterStorage::getCurrentTime() const {
 }
 
 StorageResult<bool> ParameterStorage::copyString(char* dest, const char* src, size_t max_len) {
-    if (!dest || !src || max_len == 0) {
-        return StorageError::INVALID_PARAMETER;
-    }
-
+    if (!dest || !src || max_len == 0) return StorageError::INVALID_PARAMETER;
     size_t len = std::strlen(src);
-    if (len >= max_len) {
-        return StorageError::INVALID_PARAMETER;
-    }
-
+    if (len >= max_len) return StorageError::INVALID_PARAMETER;
     std::strncpy(dest, src, max_len - 1);
     dest[max_len - 1] = '\0';
     return true;
 }
 
-// Enhanced validation and safety methods
-
 StorageResult<ValidationResult> ParameterStorage::validateParameterChange(const char* name, float value,
                                                                         AuthorizationLevel auth_level,
                                                                         bool allow_safety_critical) {
-    if (!name || !initialized_) {
-        return StorageError::INVALID_PARAMETER;
-    }
-
-    // Find parameter in cache
+    if (!name || !initialized_) return StorageError::INVALID_PARAMETER;
     auto cache_entry = findInCache(name);
-    if (cache_entry.isError()) {
-        return StorageError::INVALID_PARAMETER;
-    }
-
+    if (cache_entry.isError()) return StorageError::INVALID_PARAMETER;
     ParameterCacheEntry* entry = cache_entry.value;
-    if (!entry) {
-        return StorageError::INVALID_PARAMETER;
-    }
-
+    if (!entry) return StorageError::INVALID_PARAMETER;
     const StoredParameter& param = entry->stored_param;
-
-    // Validate access authorization
     auto access_result = param.validateAccess(auth_level, allow_safety_critical);
-    if (access_result != ValidationResult::SUCCESS) {
-        return access_result;
-    }
-
-    // Validate value range
+    if (access_result != ValidationResult::SUCCESS) return access_result;
     auto value_result = param.validateValue(value);
-    if (value_result != ValidationResult::SUCCESS) {
-        return value_result;
-    }
-
+    if (value_result != ValidationResult::SUCCESS) return value_result;
     return ValidationResult::SUCCESS;
 }
 
 StorageResult<uint32_t> ParameterStorage::beginTransaction() {
-    if (active_transaction_.active) {
-        return StorageError::INVALID_PARAMETER; // Already in transaction
-    }
-
+    if (active_transaction_.active) return StorageError::INVALID_PARAMETER;
     active_transaction_.active = true;
     active_transaction_.change_count = 0;
     active_transaction_.transaction_id = ++current_sequence_number_;
-
     return active_transaction_.transaction_id;
 }
 
@@ -620,14 +530,11 @@ StorageResult<bool> ParameterStorage::commitTransaction(uint32_t transaction_id)
     if (!active_transaction_.active || active_transaction_.transaction_id != transaction_id) {
         return StorageError::INVALID_PARAMETER;
     }
-
-    // Apply all pending changes
     auto apply_result = applyTransactionChanges();
     if (apply_result.isError()) {
         clearTransaction();
         return apply_result.error;
     }
-
     clearTransaction();
     return true;
 }
@@ -636,25 +543,16 @@ StorageResult<bool> ParameterStorage::rollbackTransaction(uint32_t transaction_i
     if (!active_transaction_.active || active_transaction_.transaction_id != transaction_id) {
         return StorageError::INVALID_PARAMETER;
     }
-
     clearTransaction();
     return true;
 }
 
 StorageResult<std::vector<ParameterChangeNotification>> ParameterStorage::analyzeParameterChange(const char* name, float new_value) {
     std::vector<ParameterChangeNotification> notifications;
-
-    if (!name || !initialized_) {
-        return StorageError::INVALID_PARAMETER;
-    }
-
+    if (!name || !initialized_) return StorageError::INVALID_PARAMETER;
     auto cache_entry = findInCache(name);
-    if (cache_entry.isError() || !cache_entry.value) {
-        return StorageError::INVALID_PARAMETER;
-    }
-
+    if (cache_entry.isError() || !cache_entry.value) return StorageError::INVALID_PARAMETER;
     const StoredParameter& param = cache_entry.value->stored_param;
-
     ParameterChangeNotification notification;
     copyString(notification.name, name, Config::MAX_PARAM_NAME_LEN);
     notification.old_value = param.value;
@@ -662,22 +560,14 @@ StorageResult<std::vector<ParameterChangeNotification>> ParameterStorage::analyz
     notification.requires_reboot = param.requiresReboot();
     notification.is_safety_critical = param.isSafetyCritical();
     notification.timestamp = getCurrentTime();
-
     notifications.push_back(notification);
-
     return notifications;
 }
 
 StorageResult<bool> ParameterStorage::addToTransaction(const char* name, float old_value, float new_value,
                                                      bool requires_reboot, bool is_safety_critical) {
-    if (!active_transaction_.active) {
-        return StorageError::INVALID_PARAMETER;
-    }
-
-    if (active_transaction_.change_count >= 16) {
-        return StorageError::STORAGE_FULL;
-    }
-
+    if (!active_transaction_.active) return StorageError::INVALID_PARAMETER;
+    if (active_transaction_.change_count >= 16) return StorageError::STORAGE_FULL;
     auto& change = active_transaction_.pending_changes[active_transaction_.change_count++];
     copyString(change.name, name, Config::MAX_PARAM_NAME_LEN);
     change.old_value = old_value;
@@ -685,34 +575,21 @@ StorageResult<bool> ParameterStorage::addToTransaction(const char* name, float o
     change.requires_reboot = requires_reboot;
     change.is_safety_critical = is_safety_critical;
     change.timestamp = getCurrentTime();
-
     return true;
 }
 
 StorageResult<bool> ParameterStorage::applyTransactionChanges() {
-    if (!active_transaction_.active) {
-        return StorageError::INVALID_PARAMETER;
-    }
-
+    if (!active_transaction_.active) return StorageError::INVALID_PARAMETER;
     for (uint8_t i = 0; i < active_transaction_.change_count; i++) {
         const auto& change = active_transaction_.pending_changes[i];
-
         auto cache_entry = findInCache(change.name);
-        if (cache_entry.isError() || !cache_entry.value) {
-            return StorageError::INVALID_PARAMETER;
-        }
-
+        if (cache_entry.isError() || !cache_entry.value) return StorageError::INVALID_PARAMETER;
         ParameterCacheEntry* entry = cache_entry.value;
         entry->stored_param.value = change.new_value;
         entry->dirty = true;
         updateAccessTime(entry);
-
-        // Call setter callback if available
-        if (entry->setter) {
-            entry->setter(change.new_value);
-        }
+        if (entry->setter) entry->setter(change.new_value);
     }
-
     return true;
 }
 

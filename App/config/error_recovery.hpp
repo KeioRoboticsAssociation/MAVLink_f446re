@@ -1,3 +1,8 @@
+/**
+ * @file error_recovery.hpp
+ * @brief Defines the error recovery mechanisms for the system.
+ */
+
 #pragma once
 
 #include "system_config.hpp"
@@ -8,18 +13,22 @@
 
 namespace Config {
 
-// Recovery action types
+/**
+ * @brief Defines the possible recovery actions for an error.
+ */
 enum class RecoveryAction : uint8_t {
-    NONE = 0,           // No action needed
-    RETRY = 1,          // Retry the operation
-    RESET = 2,          // Reset the component
-    REINITIALIZE = 3,   // Reinitialize the component
-    FALLBACK = 4,       // Switch to fallback mode
-    EMERGENCY_STOP = 5, // Trigger emergency stop
-    SYSTEM_RESTART = 6  // Restart entire system
+    NONE = 0,
+    RETRY = 1,
+    RESET = 2,
+    REINITIALIZE = 3,
+    FALLBACK = 4,
+    EMERGENCY_STOP = 5,
+    SYSTEM_RESTART = 6
 };
 
-// Recovery strategy configuration
+/**
+ * @brief Defines a recovery strategy for a specific error code.
+ */
 struct RecoveryStrategy {
     ErrorCode errorCode;
     RecoveryAction primaryAction;
@@ -31,7 +40,9 @@ struct RecoveryStrategy {
     const char* description;
 };
 
-// Recovery context for tracking ongoing recovery
+/**
+ * @brief Tracks the context of an ongoing recovery process.
+ */
 struct RecoveryContext {
     ErrorCode lastError = ErrorCode::OK;
     RecoveryAction currentAction = RecoveryAction::NONE;
@@ -42,22 +53,19 @@ struct RecoveryContext {
     bool recoveryInProgress = false;
 };
 
-// Recovery callback types
 using RecoveryCallback = std::function<Config::Result<void>(ErrorCode, RecoveryAction)>;
 using ProgressCallback = std::function<void(ErrorCode, RecoveryAction, uint32_t currentStep, uint32_t totalSteps)>;
 
-// Error recovery manager
+/**
+ * @brief Manages error recovery strategies and execution.
+ */
 class ErrorRecoveryManager {
 private:
     std::array<RecoveryStrategy, 256> strategies_;
     RecoveryContext context_;
-
-    // Callbacks
     RecoveryCallback recoveryCallback_;
     ProgressCallback progressCallback_;
     std::function<void(const char*)> logCallback_;
-
-    // Statistics
     uint32_t totalRecoveries_ = 0;
     uint32_t successfulRecoveries_ = 0;
     uint32_t failedRecoveries_ = 0;
@@ -65,39 +73,59 @@ private:
 public:
     ErrorRecoveryManager();
 
-    // Configuration
+    /**
+     * @brief Configures a recovery strategy for a given error code.
+     * @param errorCode The error code to configure.
+     * @param strategy The recovery strategy.
+     */
     void configureStrategy(ErrorCode errorCode, const RecoveryStrategy& strategy);
+
+    /**
+     * @brief Sets the callback function for executing recovery actions.
+     * @param callback The recovery callback.
+     */
     void setRecoveryCallback(RecoveryCallback callback) { recoveryCallback_ = callback; }
+
+    /**
+     * @brief Sets the callback function for reporting recovery progress.
+     * @param callback The progress callback.
+     */
     void setProgressCallback(ProgressCallback callback) { progressCallback_ = callback; }
+
+    /**
+     * @brief Sets the callback function for logging.
+     * @param callback The log callback.
+     */
     void setLogCallback(std::function<void(const char*)> callback) { logCallback_ = callback; }
 
-    // Recovery execution
+    /**
+     * @brief Handles an error by triggering the appropriate recovery strategy.
+     * @param errorCode The error code that occurred.
+     * @param context Optional context information.
+     * @return Result of the operation.
+     */
     Config::Result<void> handleError(ErrorCode errorCode, const char* context = nullptr);
+
+    /**
+     * @brief Executes a specific recovery action.
+     * @param errorCode The error code.
+     * @param action The recovery action to execute.
+     * @return Result of the operation.
+     */
     Config::Result<void> executeRecovery(ErrorCode errorCode, RecoveryAction action);
 
-    // Status and control
     bool isRecoveryInProgress() const { return context_.recoveryInProgress; }
     bool requiresUserConfirmation() const { return context_.userConfirmationRequired; }
     void confirmUserAction();
     void cancelRecovery();
-
-    // Progress tracking
     void reportProgress(uint32_t currentStep, uint32_t totalSteps);
-
-    // Statistics
     uint32_t getTotalRecoveries() const { return totalRecoveries_; }
     uint32_t getSuccessfulRecoveries() const { return successfulRecoveries_; }
     uint32_t getFailedRecoveries() const { return failedRecoveries_; }
-    float getSuccessRate() const {
-        return totalRecoveries_ > 0 ?
-            static_cast<float>(successfulRecoveries_) / totalRecoveries_ : 0.0f;
-    }
+    float getSuccessRate() const;
 
-    // Utility functions
     static RecoveryStrategy getDefaultStrategy(ErrorCode errorCode);
     static const char* getActionName(RecoveryAction action);
-
-    // Singleton access
     static ErrorRecoveryManager& getInstance();
 
 private:
@@ -113,7 +141,9 @@ private:
     Config::Result<void> performSystemRestart(ErrorCode errorCode);
 };
 
-// RAII Recovery guard for automatic error handling
+/**
+ * @brief An RAII guard for automatic error handling.
+ */
 class RecoveryGuard {
 private:
     ErrorRecoveryManager& manager_;
@@ -124,21 +154,18 @@ public:
     RecoveryGuard(ErrorRecoveryManager& manager, ErrorCode errorToMonitor, bool autoRecover = true)
         : manager_(manager), monitoredError_(errorToMonitor), autoRecover_(autoRecover) {}
 
-    ~RecoveryGuard() {
-        if (autoRecover_ && monitoredError_ != ErrorCode::OK) {
-            manager_.handleError(monitoredError_, "RecoveryGuard");
-        }
-    }
+    ~RecoveryGuard();
 
     void setError(ErrorCode error) { monitoredError_ = error; }
     void clearError() { monitoredError_ = ErrorCode::OK; }
 
-    // Non-copyable
     RecoveryGuard(const RecoveryGuard&) = delete;
     RecoveryGuard& operator=(const RecoveryGuard&) = delete;
 };
 
-// Component-specific recovery interfaces
+/**
+ * @brief Interface for components that can be recovered.
+ */
 class IRecoverableComponent {
 public:
     virtual ~IRecoverableComponent() = default;
@@ -150,7 +177,9 @@ public:
     virtual const char* getComponentName() const = 0;
 };
 
-// Recovery coordinator for system-wide recovery
+/**
+ * @brief Coordinates recovery actions across multiple components.
+ */
 class RecoveryCoordinator {
 private:
     std::array<IRecoverableComponent*, 16> components_;
@@ -161,21 +190,15 @@ public:
     explicit RecoveryCoordinator(ErrorRecoveryManager& manager = ErrorRecoveryManager::getInstance())
         : recoveryManager_(manager) {}
 
-    // Component registration
     Config::Result<void> registerComponent(IRecoverableComponent* component);
     void unregisterComponent(IRecoverableComponent* component);
-
-    // System-wide recovery
     Config::Result<void> performSystemRecovery(ErrorCode errorCode);
     Config::Result<void> resetAllComponents();
     Config::Result<void> reinitializeAllComponents();
-
-    // Status
     size_t getComponentCount() const { return componentCount_; }
     bool areAllComponentsHealthy() const;
 };
 
-// Global recovery manager instance
 extern ErrorRecoveryManager& recoveryManager;
 extern RecoveryCoordinator& recoveryCoordinator;
 

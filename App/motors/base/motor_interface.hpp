@@ -1,3 +1,8 @@
+/**
+ * @file motor_interface.hpp
+ * @brief Defines the core interfaces and data structures for motor control.
+ */
+
 #pragma once
 
 #include "../../config/system_config.hpp"
@@ -8,17 +13,21 @@
 
 namespace Motors {
 
-// Motor status using unified error codes
+/**
+ * @brief Represents the status of a motor, using the unified error code system.
+ */
 using MotorStatus = Config::ErrorCode;
 
-// Base state structure for all motors
+/**
+ * @brief Base state structure for all motors.
+ */
 struct BaseMotorState {
-    float currentPosition = 0.0f;      // Current position (degrees for servo, radians for others)
-    float targetPosition = 0.0f;       // Target position
-    float currentVelocity = 0.0f;      // Current velocity
-    float targetVelocity = 0.0f;       // Target velocity
-    float currentCurrent = 0.0f;       // Current draw in Amperes
-    float temperature = 0.0f;          // Temperature in Celsius
+    float currentPosition = 0.0f;
+    float targetPosition = 0.0f;
+    float currentVelocity = 0.0f;
+    float targetVelocity = 0.0f;
+    float currentCurrent = 0.0f;
+    float temperature = 0.0f;
     MotorStatus status = Config::ErrorCode::NOT_INITIALIZED;
     bool enabled = false;
     uint32_t lastUpdateTime = 0;
@@ -26,10 +35,11 @@ struct BaseMotorState {
     uint32_t timeoutCount = 0;
 };
 
-// Alias for compatibility
 using MotorState = BaseMotorState;
 
-// Motor control modes
+/**
+ * @brief Defines the control modes for a motor.
+ */
 enum class ControlMode : uint8_t {
     POSITION = 0,
     VELOCITY = 1,
@@ -38,7 +48,9 @@ enum class ControlMode : uint8_t {
     DISABLED = 255
 };
 
-// Motor command structure
+/**
+ * @brief Represents a command to be sent to a motor.
+ */
 struct MotorCommand {
     uint8_t motorId;
     ControlMode mode;
@@ -47,54 +59,43 @@ struct MotorCommand {
     uint32_t timestamp;
 };
 
-// Unified motor interface
+/**
+ * @brief Unified interface for all motor controllers.
+ * @tparam TConfig The configuration type for the motor controller.
+ */
 template<typename TConfig>
 class IMotorController {
 public:
     virtual ~IMotorController() = default;
 
-    // Core interface
     virtual Config::Result<void> initialize(const TConfig& config) = 0;
     virtual Config::Result<void> update(float deltaTime) = 0;
     virtual Config::Result<void> setCommand(const MotorCommand& cmd) = 0;
     virtual Config::Result<void> setEnabled(bool enabled) = 0;
 
-    // State access
     virtual BaseMotorState getState() const = 0;
     virtual uint8_t getId() const = 0;
     virtual MotorStatus getStatus() const = 0;
 
-    // Safety and maintenance
     virtual void emergencyStop() = 0;
     virtual void resetWatchdog() = 0;
     virtual Config::Result<void> runSelfTest() = 0;
 
-    // Configuration
     virtual Config::Result<void> updateConfig(const TConfig& config) = 0;
     virtual TConfig getConfig() const = 0;
 
-    // Callbacks for external systems
     virtual void setErrorCallback(std::function<void(uint8_t, MotorStatus)> callback) = 0;
     virtual void setStateCallback(std::function<void(uint8_t, const BaseMotorState&)> callback) = 0;
 
 protected:
-    // Common validation helpers
-    static bool isValidPosition(float position, float minPos, float maxPos) {
-        return position >= minPos && position <= maxPos;
-    }
-
-    static bool isValidVelocity(float velocity, float maxVel) {
-        return velocity >= -maxVel && velocity <= maxVel;
-    }
-
-    static float constrainValue(float value, float min, float max) {
-        if (value < min) return min;
-        if (value > max) return max;
-        return value;
-    }
+    static bool isValidPosition(float position, float minPos, float maxPos);
+    static bool isValidVelocity(float velocity, float maxVel);
+    static float constrainValue(float value, float min, float max);
 };
 
-// Motor factory interface
+/**
+ * @brief Interface for a motor factory.
+ */
 class IMotorFactory {
 public:
     virtual ~IMotorFactory() = default;
@@ -103,7 +104,9 @@ public:
     virtual std::unique_ptr<IMotorController<Config::RoboMasterConfig>> createRoboMaster(uint8_t id) = 0;
 };
 
-// Base class for type-erased motor controllers
+/**
+ * @brief Base class for type-erased motor controllers.
+ */
 class IMotorControllerBase {
 public:
     virtual ~IMotorControllerBase() = default;
@@ -114,40 +117,28 @@ public:
     virtual uint8_t getId() const = 0;
 };
 
-// Template wrapper for type-erased motor controllers
+/**
+ * @brief Template wrapper for type-erased motor controllers.
+ * @tparam TController The specific motor controller type.
+ */
 template<typename TController>
 class MotorControllerWrapper : public IMotorControllerBase {
 private:
     std::unique_ptr<TController> controller_;
 
 public:
-    explicit MotorControllerWrapper(std::unique_ptr<TController> controller)
-        : controller_(std::move(controller)) {}
-
-    BaseMotorState getState() const override {
-        return controller_->getState();
-    }
-
-    Config::Result<void> setCommand(const MotorCommand& cmd) override {
-        return controller_->setCommand(cmd);
-    }
-
-    void emergencyStop() override {
-        controller_->emergencyStop();
-    }
-
-    Config::Result<void> update(float deltaTime) override {
-        return controller_->update(deltaTime);
-    }
-
-    uint8_t getId() const override {
-        return controller_->getId();
-    }
-
-    TController* get() const { return controller_.get(); }
+    explicit MotorControllerWrapper(std::unique_ptr<TController> controller);
+    BaseMotorState getState() const override;
+    Config::Result<void> setCommand(const MotorCommand& cmd) override;
+    void emergencyStop() override;
+    Config::Result<void> update(float deltaTime) override;
+    uint8_t getId() const override;
+    TController* get() const;
 };
 
-// Motor registry for managing all motor instances
+/**
+ * @brief Manages all motor instances in the system.
+ */
 class MotorRegistry {
 private:
     struct MotorInstance {
@@ -160,27 +151,7 @@ private:
 
 public:
     template<typename TController>
-    Config::Result<Config::ErrorCode> registerMotor(uint8_t id, std::unique_ptr<TController> controller) {
-        if (motorCount_ >= Config::System::MAX_MOTORS) {
-            return Config::ErrorCode::OUT_OF_RANGE;
-        }
-
-        // Check for duplicate IDs
-        for (size_t i = 0; i < motorCount_; ++i) {
-            if (motors_[i].controller && motors_[i].controller->getId() == id) {
-                return Config::ErrorCode::CONFIG_ERROR;
-            }
-        }
-
-        // Create type-erased wrapper
-        MotorInstance instance;
-        instance.controller = std::make_unique<MotorControllerWrapper<TController>>(std::move(controller));
-        instance.type = Config::MotorInstance::Type::SERVO; // Default type, can be set properly later
-
-        motors_[motorCount_++] = std::move(instance);
-        return Config::ErrorCode::OK;
-    }
-
+    Config::Result<Config::ErrorCode> registerMotor(uint8_t id, std::unique_ptr<TController> controller);
     BaseMotorState getMotorState(uint8_t id) const;
     Config::Result<void> sendCommand(uint8_t id, const MotorCommand& cmd);
     void emergencyStopAll();

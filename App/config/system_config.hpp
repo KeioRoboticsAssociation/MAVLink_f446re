@@ -1,3 +1,8 @@
+/**
+ * @file system_config.hpp
+ * @brief Defines system-wide configuration, error handling, and utility types.
+ */
+
 #pragma once
 
 #include <cstdint>
@@ -6,75 +11,64 @@
 
 namespace Config {
 
-// Comprehensive error handling configuration
+/**
+ * @brief Defines all possible error codes in the system.
+ */
 enum class ErrorCode : uint8_t {
-    // Success
     OK = 0,
-
-    // System-level errors (1-19)
     NOT_INITIALIZED = 1,
     ALREADY_INITIALIZED = 2,
     INVALID_STATE = 3,
     RESOURCE_EXHAUSTED = 4,
-
-    // Hardware errors (20-39)
     HARDWARE_ERROR = 20,
     HARDWARE_NOT_FOUND = 21,
     HARDWARE_FAULT = 22,
     SENSOR_ERROR = 23,
     ACTUATOR_ERROR = 24,
-
-    // Communication errors (40-59)
     COMMUNICATION_ERROR = 40,
     TIMEOUT = 41,
     PROTOCOL_ERROR = 42,
     CHECKSUM_ERROR = 43,
     BUFFER_OVERFLOW = 44,
-
-    // Configuration errors (60-79)
     CONFIG_ERROR = 60,
     INVALID_PARAMETER = 61,
     OUT_OF_RANGE = 62,
     MISSING_CONFIG = 63,
     CONFIG_PARSE_ERROR = 64,
-
-    // Safety errors (80-99)
     SAFETY_VIOLATION = 80,
     EMERGENCY_STOP = 81,
     OVER_TEMPERATURE = 82,
     OVER_CURRENT = 83,
     POSITION_LIMIT = 84,
     VELOCITY_LIMIT = 85,
-
-    // Motor-specific errors (100-119)
     MOTOR_ERROR = 100,
     MOTOR_STALL = 101,
     ENCODER_ERROR = 102,
     CALIBRATION_ERROR = 103,
-
-    // Network/MAVLink errors (120-139)
     MAVLINK_ERROR = 120,
     MESSAGE_DROPPED = 121,
     INVALID_MESSAGE = 122,
     SEQUENCE_ERROR = 123,
-
-    // Generic errors (200+)
     UNKNOWN_ERROR = 200,
     NOT_SUPPORTED = 201,
     NOT_IMPLEMENTED = 202,
     INTERNAL_ERROR = 203
 };
 
-// Error severity levels for logging and handling
+/**
+ * @brief Defines the severity levels for errors.
+ */
 enum class ErrorSeverity : uint8_t {
-    INFO = 0,     // Informational - no action needed
-    WARNING = 1,  // Warning - system can continue but attention needed
-    ERROR = 2,    // Error - functionality affected, recovery possible
-    CRITICAL = 3, // Critical - system integrity threatened
-    FATAL = 4     // Fatal - system must stop immediately
+    INFO = 0,
+    WARNING = 1,
+    ERROR = 2,
+    CRITICAL = 3,
+    FATAL = 4
 };
 
-// Error category for grouping related errors
+/**
+ * @brief Defines categories for grouping related errors.
+ */
 enum class ErrorCategory : uint8_t {
     SYSTEM = 0,
     HARDWARE = 1,
@@ -86,7 +80,9 @@ enum class ErrorCategory : uint8_t {
     GENERIC = 7
 };
 
-// Error information structure
+/**
+ * @brief Contains detailed information about an error.
+ */
 struct ErrorInfo {
     ErrorCode code;
     ErrorSeverity severity;
@@ -95,7 +91,9 @@ struct ErrorInfo {
     const char* recovery_hint;
 };
 
-// Error code utilities
+/**
+ * @brief Provides utility functions for working with error codes.
+ */
 class ErrorUtils {
 public:
     static ErrorSeverity getSeverity(ErrorCode code);
@@ -106,7 +104,10 @@ public:
     static bool requiresEmergencyStop(ErrorCode code);
 };
 
-// Result type for error handling
+/**
+ * @brief A template class for handling results of operations that can fail.
+ * @tparam T The type of the value returned on success.
+ */
 template<typename T>
 class Result {
 private:
@@ -117,97 +118,54 @@ private:
     };
 
 public:
-    Result(T&& val) : hasValue_(true), value_(std::move(val)) {}
-    Result(const T& val) : hasValue_(true), value_(val) {}
-    explicit Result(ErrorCode err) : hasValue_(false), error_(err) {}
+    Result(T&& val);
+    Result(const T& val);
+    explicit Result(ErrorCode err);
+    ~Result();
 
-    ~Result() {
-        if (hasValue_) {
-            value_.~T();
-        }
-    }
+    Result(const Result& other);
+    Result(Result&& other);
 
-    // Copy constructor
-    Result(const Result& other) : hasValue_(other.hasValue_) {
-        if (hasValue_) {
-            new (&value_) T(other.value_);
-        } else {
-            error_ = other.error_;
-        }
-    }
+    bool isOk() const;
+    bool isError() const;
+    T& get();
+    const T& get() const;
+    ErrorCode error() const;
 
-    // Move constructor
-    Result(Result&& other) : hasValue_(other.hasValue_) {
-        if (hasValue_) {
-            new (&value_) T(std::move(other.value_));
-        } else {
-            error_ = other.error_;
-        }
-    }
-
-    bool isOk() const { return hasValue_; }
-    bool isError() const { return !hasValue_; }
-
-    T& get() { return value_; }
-    const T& get() const { return value_; }
-
-    ErrorCode error() const { return error_; }
-
-    // Convenience operators
-    explicit operator bool() const { return isOk(); }
-    T& operator*() { return get(); }
-    const T& operator*() const { return get(); }
-
-    // Functional programming style operations
-    template<typename F>
-    auto map(F&& func) -> Result<decltype(func(value_))> {
-        if (hasValue_) {
-            return Result<decltype(func(value_))>(func(value_));
-        } else {
-            return Result<decltype(func(value_))>(error_);
-        }
-    }
+    explicit operator bool() const;
+    T& operator*();
+    const T& operator*() const;
 
     template<typename F>
-    auto flatMap(F&& func) -> decltype(func(value_)) {
-        if (hasValue_) {
-            return func(value_);
-        } else {
-            return decltype(func(value_))(error_);
-        }
-    }
+    auto map(F&& func) -> Result<decltype(func(value_))>;
+    template<typename F>
+    auto flatMap(F&& func) -> decltype(func(value_))>;
 
-    // Get value with default
-    T getOr(const T& defaultValue) const {
-        return hasValue_ ? value_ : defaultValue;
-    }
+    T getOr(const T& defaultValue) const;
 
-    // Error context support
-    ErrorSeverity getSeverity() const { return ErrorUtils::getSeverity(error_); }
-    ErrorCategory getCategory() const { return ErrorUtils::getCategory(error_); }
-    const char* getDescription() const { return ErrorUtils::getDescription(error_); }
-    bool isRecoverable() const { return ErrorUtils::isRecoverable(error_); }
+    ErrorSeverity getSeverity() const;
+    ErrorCategory getCategory() const;
+    const char* getDescription() const;
+    bool isRecoverable() const;
 };
 
-// Helper factory functions to create Result instances
+/**
+ * @brief A factory for creating Result instances.
+ */
 struct ResultFactory {
     template<typename T>
-    static Result<T> success(T&& value) {
-        return Result<T>(std::forward<T>(value));
-    }
+    static Result<T> success(T&& value);
 
     template<typename T>
-    static Result<T> success(const T& value) {
-        return Result<T>(value);
-    }
+    static Result<T> success(const T& value);
 
     template<typename T>
-    static Result<T> error(ErrorCode err) {
-        return Result<T>(err);
-    }
+    static Result<T> error(ErrorCode err);
 };
 
-// Specialization for void type
+/**
+ * @brief Specialization of the Result class for void return types.
+ */
 template<>
 class Result<void> {
 private:
@@ -215,19 +173,18 @@ private:
     ErrorCode error_;
 
 public:
-    Result() : hasValue_(true), error_(ErrorCode::OK) {}
-    Result(ErrorCode err) : hasValue_(false), error_(err) {}
+    Result();
+    Result(ErrorCode err);
 
-    bool isOk() const { return hasValue_; }
-    bool isError() const { return !hasValue_; }
-
-    ErrorCode error() const { return error_; }
-
-    // Convenience operators
-    explicit operator bool() const { return isOk(); }
+    bool isOk() const;
+    bool isError() const;
+    ErrorCode error() const;
+    explicit operator bool() const;
 };
 
-// Safety limits
+/**
+ * @brief Defines system-wide safety limits.
+ */
 struct SafetyLimits {
     static constexpr float MAX_TEMPERATURE_C = 85.0f;
     static constexpr float MAX_CURRENT_A = 5.0f;
@@ -236,7 +193,9 @@ struct SafetyLimits {
     static constexpr uint32_t HEARTBEAT_TIMEOUT_MS = 5000;
 };
 
-// Communication configuration
+/**
+ * @brief Configuration for communication protocols.
+ */
 namespace Communication {
     static constexpr uint32_t MAVLINK_HEARTBEAT_INTERVAL_MS = 1000;
     static constexpr uint32_t TELEMETRY_RATE_HZ = 10;
@@ -244,14 +203,18 @@ namespace Communication {
     static constexpr uint8_t MAX_PENDING_COMMANDS = 16;
 }
 
-// Memory management
+/**
+ * @brief Configuration for memory management.
+ */
 namespace Memory {
     static constexpr size_t MOTOR_POOL_SIZE = 8;
     static constexpr size_t MESSAGE_POOL_SIZE = 32;
     static constexpr size_t RING_BUFFER_SIZE = 512;
 }
 
-// Debug configuration
+/**
+ * @brief Configuration for debugging features.
+ */
 namespace Debug {
 #ifdef DEBUG
     static constexpr bool LOGGING_ENABLED = true;

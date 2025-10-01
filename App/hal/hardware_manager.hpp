@@ -1,3 +1,8 @@
+/**
+ * @file hardware_manager.hpp
+ * @brief Defines the Hardware Abstraction Layer (HAL) for managing hardware resources.
+ */
+
 #pragma once
 
 #include "stm32f4xx_hal.h"
@@ -7,7 +12,9 @@
 
 namespace HAL {
 
-// Hardware handle types
+/**
+ * @brief Handle for a hardware timer.
+ */
 struct TimerHandle {
     TIM_HandleTypeDef* htim;
     uint32_t channel;
@@ -15,6 +22,9 @@ struct TimerHandle {
     std::function<void()> errorCallback;
 };
 
+/**
+ * @brief Handle for a UART peripheral.
+ */
 struct UARTHandle {
     UART_HandleTypeDef* huart;
     bool initialized;
@@ -23,6 +33,9 @@ struct UARTHandle {
     std::function<void()> errorCallback;
 };
 
+/**
+ * @brief Handle for a CAN peripheral.
+ */
 struct CANHandle {
     CAN_HandleTypeDef* hcan;
     bool initialized;
@@ -31,6 +44,9 @@ struct CANHandle {
     std::function<void()> errorCallback;
 };
 
+/**
+ * @brief Handle for a GPIO pin.
+ */
 struct GPIOHandle {
     GPIO_TypeDef* port;
     uint16_t pin;
@@ -38,7 +54,9 @@ struct GPIOHandle {
     std::function<void(bool)> changeCallback;
 };
 
-// Timer IDs for type-safe access
+/**
+ * @brief Type-safe identifiers for timers.
+ */
 enum class TimerID : uint8_t {
     TIM_1 = 1,
     TIM_2 = 2,
@@ -47,56 +65,56 @@ enum class TimerID : uint8_t {
     MAX_TIMERS = 4
 };
 
+/**
+ * @brief Type-safe identifiers for UARTs.
+ */
 enum class UARTID : uint8_t {
     UART_2 = 2,
     MAX_UARTS = 1
 };
 
+/**
+ * @brief Type-safe identifiers for CAN peripherals.
+ */
 enum class CANID : uint8_t {
     CAN_1 = 1,
     MAX_CAN = 1
 };
 
-// Central hardware manager
+/**
+ * @brief Central manager for all hardware resources.
+ */
 class HardwareManager {
 private:
     std::array<TimerHandle, static_cast<size_t>(TimerID::MAX_TIMERS)> timers_;
     std::array<UARTHandle, static_cast<size_t>(UARTID::MAX_UARTS)> uarts_;
     std::array<CANHandle, static_cast<size_t>(CANID::MAX_CAN)> can_;
-
     bool initialized_ = false;
 
 public:
-    // Initialization
     Config::Result<void> initialize();
     bool isInitialized() const { return initialized_; }
 
-    // Timer management
     Config::Result<TimerHandle*> getTimer(TimerID id);
     Config::Result<void> startPWM(TimerID id, uint32_t channel);
     Config::Result<void> setPWMDutyCycle(TimerID id, uint32_t channel, uint32_t value);
     Config::Result<void> setTimerCallback(TimerID id, std::function<void()> callback);
 
-    // UART management
     Config::Result<UARTHandle*> getUART(UARTID id);
     Config::Result<void> transmitUART(UARTID id, const uint8_t* data, size_t length);
     Config::Result<void> setUARTRxCallback(UARTID id, std::function<void(uint8_t*, size_t)> callback);
 
-    // CAN management
     Config::Result<CANHandle*> getCAN(CANID id);
     Config::Result<void> transmitCAN(CANID id, uint32_t canId, const uint8_t* data, size_t length);
     Config::Result<void> setCANRxCallback(CANID id, std::function<void(CAN_RxHeaderTypeDef*, uint8_t*)> callback);
 
-    // GPIO management
     Config::Result<bool> readGPIO(GPIO_TypeDef* port, uint16_t pin);
     Config::Result<void> writeGPIO(GPIO_TypeDef* port, uint16_t pin, bool state);
     Config::Result<void> setGPIOCallback(GPIO_TypeDef* port, uint16_t pin, std::function<void(bool)> callback);
 
-    // System utilities
     uint32_t getSystemTick() const { return HAL_GetTick(); }
     void delay(uint32_t ms) { HAL_Delay(ms); }
 
-    // Error handling
     void handleTimerError(TimerID id);
     void handleUARTError(UARTID id);
     void handleCANError(CANID id);
@@ -111,10 +129,8 @@ private:
     CANHandle* getCANHandle(CANID id);
 };
 
-// Global hardware manager instance
 extern HardwareManager g_hardwareManager;
 
-// Hardware interrupt handlers (to be called from STM32 HAL callbacks)
 extern "C" {
     void HAL_TIM_PWM_PulseFinishedCallback(TIM_HandleTypeDef *htim);
     void HAL_TIM_ErrorCallback(TIM_HandleTypeDef *htim);
