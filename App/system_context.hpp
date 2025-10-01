@@ -1,3 +1,8 @@
+/**
+ * @file system_context.hpp
+ * @brief Defines the main system context, safety manager, and application class.
+ */
+
 #pragma once
 
 #include "hal/hardware_manager.hpp"
@@ -19,38 +24,44 @@ namespace Communication {
 
 namespace System {
 
-// Forward declarations
 class SafetyManager;
 class Application;
 
-// System context for dependency injection
+/**
+ * @brief Manages the overall state and dependencies of the system.
+ *
+ * This class acts as a central point for accessing all major subsystems,
+ * ensuring that they are initialized in the correct order and can interact
+ * with each other.
+ */
 class SystemContext {
 public:
-    // Hardware subsystem
+    /**
+     * @brief Manages the hardware abstraction layer.
+     */
     struct Hardware {
         std::unique_ptr<HAL::HardwareManager> manager;
 
-        Config::Result<void> initialize() {
-            manager = std::make_unique<HAL::HardwareManager>();
-            return manager->initialize();
-        }
-
-        HAL::HardwareManager* get() const { return manager.get(); }
+        Config::Result<void> initialize();
+        HAL::HardwareManager* get() const;
     } hardware;
 
-    // Motor subsystem
+    /**
+     * @brief Manages all motor-related subsystems.
+     */
     struct Motors {
         std::unique_ptr<class ::Motors::MotorRegistry> registry_;
         std::unique_ptr<class ::Motors::IMotorFactory> factory_;
 
         Config::Result<Config::ErrorCode> initialize(HAL::HardwareManager* hwManager);
         Config::Result<Config::ErrorCode> createAllMotors();
-
         ::Motors::MotorRegistry* getRegistry() const;
         ::Motors::IMotorFactory* getFactory() const;
     } motors;
 
-    // Communication subsystem
+    /**
+     * @brief Manages all communication protocols.
+     */
     struct Communication {
         std::unique_ptr<class ::Communication::UnifiedMAVLinkHandler> handler_;
 
@@ -58,16 +69,19 @@ public:
         ::Communication::UnifiedMAVLinkHandler* get() const;
     } communication;
 
-    // Safety subsystem
+    /**
+     * @brief Manages system safety features.
+     */
     struct Safety {
         std::unique_ptr<SafetyManager> manager;
 
         Config::Result<Config::ErrorCode> initialize(HAL::HardwareManager* hwManager);
-
-        SafetyManager* get() const { return manager.get(); }
+        SafetyManager* get() const;
     } safety;
 
-    // System-wide state
+    /**
+     * @brief Holds the overall state of the system.
+     */
     struct SystemState {
         bool initialized = false;
         bool emergencyStop = false;
@@ -78,24 +92,20 @@ public:
     } state;
 
 public:
-    // System lifecycle
     Config::Result<Config::ErrorCode> initialize();
     Config::Result<Config::ErrorCode> update();
     void shutdown();
 
-    // Subsystem access
-    HAL::HardwareManager* getHardware() const { return hardware.get(); }
-    ::Motors::MotorRegistry* getMotors() const { return motors.getRegistry(); }
-    ::Communication::UnifiedMAVLinkHandler* getCommunication() const { return communication.get(); }
-    SafetyManager* getSafety() const { return safety.get(); }
+    HAL::HardwareManager* getHardware() const;
+    ::Motors::MotorRegistry* getMotors() const;
+    ::Communication::UnifiedMAVLinkHandler* getCommunication() const;
+    SafetyManager* getSafety() const;
 
-    // State access
-    bool isInitialized() const { return state.initialized; }
-    bool isEmergencyStop() const { return state.emergencyStop; }
+    bool isInitialized() const;
+    bool isEmergencyStop() const;
     uint32_t getUptime() const;
-    Config::ErrorCode getLastError() const { return state.lastError; }
+    Config::ErrorCode getLastError() const;
 
-    // Error handling
     void setEmergencyStop(bool emergency);
     void reportError(Config::ErrorCode error, const char* context = nullptr);
 
@@ -103,13 +113,14 @@ private:
     void logSystemState();
 };
 
-// Safety manager implementation
+/**
+ * @brief Manages system safety by monitoring limits and handling emergencies.
+ */
 class SafetyManager {
 private:
     HAL::HardwareManager* hwManager_;
     SystemContext* systemContext_;
 
-    // Safety state
     enum class SafetyState {
         NORMAL,
         WARNING,
@@ -117,7 +128,6 @@ private:
         EMERGENCY_STOP
     } currentState_ = SafetyState::NORMAL;
 
-    // Limits and thresholds
     struct SafetyLimits {
         float maxTemperature = Config::SafetyLimits::MAX_TEMPERATURE_C;
         float maxCurrent = Config::SafetyLimits::MAX_CURRENT_A;
@@ -125,51 +135,31 @@ private:
         uint32_t heartbeatTimeout = Config::SafetyLimits::HEARTBEAT_TIMEOUT_MS;
     } limits_;
 
-    // Monitoring state
     uint32_t lastHeartbeat_ = 0;
     uint32_t lastSafetyCheck_ = 0;
     uint32_t emergencyStopTime_ = 0;
 
-    // Callbacks
     std::function<void(SafetyState, SafetyState)> stateChangeCallback_;
     std::function<void(const char*)> emergencyCallback_;
 
 public:
-    SafetyManager(HAL::HardwareManager* hwManager, SystemContext* systemContext)
-        : hwManager_(hwManager), systemContext_(systemContext) {}
+    SafetyManager(HAL::HardwareManager* hwManager, SystemContext* systemContext);
 
-    // Initialization
     Config::Result<Config::ErrorCode> initialize();
-
-    // Safety monitoring
     Config::Result<void> update();
     Config::Result<void> checkAllLimits();
-
-    // Limit switch management
     Config::Result<Config::ErrorCode> registerLimitSwitch(GPIO_TypeDef* port, uint16_t pin,
                                                           std::function<void()> callback);
-
-    // Safety state management
-    SafetyState getCurrentState() const { return currentState_; }
+    SafetyState getCurrentState() const;
     void transitionToSafeState();
     void triggerEmergencyStop(const char* reason);
     void clearEmergencyStop();
-
-    // Heartbeat monitoring
-    void updateHeartbeat() { lastHeartbeat_ = hwManager_->getSystemTick(); }
+    void updateHeartbeat();
     bool isHeartbeatValid() const;
-
-    // Configuration
-    void setLimits(const SafetyLimits& limits) { limits_ = limits; }
-    SafetyLimits getLimits() const { return limits_; }
-
-    // Callbacks
-    void setStateChangeCallback(std::function<void(SafetyState, SafetyState)> callback) {
-        stateChangeCallback_ = callback;
-    }
-    void setEmergencyCallback(std::function<void(const char*)> callback) {
-        emergencyCallback_ = callback;
-    }
+    void setLimits(const SafetyLimits& limits);
+    SafetyLimits getLimits() const;
+    void setStateChangeCallback(std::function<void(SafetyState, SafetyState)> callback);
+    void setEmergencyCallback(std::function<void(const char*)> callback);
 
 private:
     void setState(SafetyState newState);
@@ -179,24 +169,23 @@ private:
     Config::Result<Config::ErrorCode> checkHeartbeat();
 };
 
-// Application class that orchestrates everything
+/**
+ * @brief Orchestrates the main application logic.
+ */
 class Application {
 private:
     SystemContext& context_;
     bool running_ = false;
-    uint32_t updateInterval_ = 10; // 10ms = 100Hz
+    uint32_t updateInterval_ = 10;
 
 public:
-    explicit Application(SystemContext& context) : context_(context) {}
+    explicit Application(SystemContext& context);
 
-    // Application lifecycle
     Config::Result<Config::ErrorCode> initialize();
     Config::Result<Config::ErrorCode> run();
-    void stop() { running_ = false; }
-
-    // Configuration
-    void setUpdateInterval(uint32_t intervalMs) { updateInterval_ = intervalMs; }
-    uint32_t getUpdateInterval() const { return updateInterval_; }
+    void stop();
+    void setUpdateInterval(uint32_t intervalMs);
+    uint32_t getUpdateInterval() const;
 
 private:
     Config::Result<Config::ErrorCode> mainLoop();

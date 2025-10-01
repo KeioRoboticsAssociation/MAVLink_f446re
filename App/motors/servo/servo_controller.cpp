@@ -1,32 +1,46 @@
+/**
+ * @file servo_controller.cpp
+ * @brief Implements the controller for servo motors.
+ */
+
 #include "servo_controller.hpp"
 
 namespace Motors {
 namespace Servo {
 
+/**
+ * @brief Construct a new ServoMotorController object.
+ * @param id The ID of the motor.
+ * @param hwManager A pointer to the hardware manager.
+ * @param timerId The ID of the timer to use for PWM.
+ * @param channel The timer channel.
+ */
 ServoMotorController::ServoMotorController(uint8_t id, HAL::HardwareManager* hwManager, HAL::TimerID timerId, uint32_t channel)
     : id_(id), hwManager_(hwManager), timerId_(timerId), channel_(channel),
       lastWatchdogReset_(0), watchdogExpired_(false) {
     state_.status = Config::ErrorCode::NOT_INITIALIZED;
 }
 
+/**
+ * @brief Initializes the servo motor controller.
+ * @param config The configuration for the servo motor.
+ * @return Result of the operation.
+ */
 Config::Result<void> ServoMotorController::initialize(const Config::ServoConfig& config) {
     config_ = config;
 
-    // Get servo-specific configuration
     const auto* servoConfig = Config::ConfigAccessor::getServoConfig(id_);
     if (!servoConfig) {
         state_.status = Config::ErrorCode::CONFIG_ERROR;
         return Config::Result<void>(state_.status);
     }
 
-    // Initialize hardware timer
     auto timerResult = hwManager_->startPWM(timerId_, channel_);
     if (!timerResult) {
         state_.status = Config::ErrorCode::HARDWARE_ERROR;
         return Config::Result<void>(state_.status);
     }
 
-    // Set initial position to startup angle
     state_.targetPosition = servoConfig->startup_angle_deg;
     state_.currentPosition = servoConfig->startup_angle_deg;
     state_.enabled = !servoConfig->start_disabled;
@@ -39,6 +53,11 @@ Config::Result<void> ServoMotorController::initialize(const Config::ServoConfig&
     return Config::Result<void>();
 }
 
+/**
+ * @brief Updates the servo motor controller.
+ * @param deltaTime The time since the last update.
+ * @return Result of the operation.
+ */
 Config::Result<void> ServoMotorController::update(float deltaTime) {
     checkWatchdog();
     updateState();
@@ -47,7 +66,6 @@ Config::Result<void> ServoMotorController::update(float deltaTime) {
         return Config::Result<void>(state_.status);
     }
 
-    // Update position based on velocity constraints
     const auto* config = Config::ConfigAccessor::getServoConfig(id_);
     if (!config) {
         return Config::Result<void>(Config::ErrorCode::CONFIG_ERROR);
@@ -55,24 +73,13 @@ Config::Result<void> ServoMotorController::update(float deltaTime) {
 
     float positionError = state_.targetPosition - state_.currentPosition;
     float maxVelocity = config->max_velocity_deg_per_s;
+    float velocityCommand = constrainValue(positionError, -maxVelocity, maxVelocity);
 
-    // Apply velocity limiting
-    float velocityCommand = positionError;
-    if (velocityCommand > maxVelocity) {
-        velocityCommand = maxVelocity;
-    } else if (velocityCommand < -maxVelocity) {
-        velocityCommand = -maxVelocity;
-    }
-
-    // Update position
     state_.currentPosition += velocityCommand * deltaTime;
     state_.currentVelocity = velocityCommand;
 
-    // Convert position to PWM and update hardware
     float pulseWidth = degreesToPulseWidth(state_.currentPosition);
-
-    // Calculate PWM value (assuming 20ms period = 50Hz)
-    uint32_t pwmValue = static_cast<uint32_t>((pulseWidth / 20000.0f) * 1000); // Scale to timer period
+    uint32_t pwmValue = static_cast<uint32_t>((pulseWidth / 20000.0f) * 1000);
 
     auto pwmResult = hwManager_->setPWMDutyCycle(timerId_, channel_, pwmValue);
     if (!pwmResult) {
@@ -84,6 +91,11 @@ Config::Result<void> ServoMotorController::update(float deltaTime) {
     return Config::Result<void>();
 }
 
+/**
+ * @brief Sets a command for the motor.
+ * @param cmd The command to set.
+ * @return Result of the operation.
+ */
 Config::Result<void> ServoMotorController::setCommand(const MotorCommand& cmd) {
     if (cmd.motorId != id_) {
         return Config::Result<void>(Config::ErrorCode::CONFIG_ERROR);
@@ -106,31 +118,43 @@ Config::Result<void> ServoMotorController::setCommand(const MotorCommand& cmd) {
     return Config::Result<void>();
 }
 
+/**
+ * @brief Enables or disables the motor.
+ * @param enabled true to enable, false to disable.
+ * @return Result of the operation.
+ */
 Config::Result<void> ServoMotorController::setEnabled(bool enabled) {
     state_.enabled = enabled;
     if (!enabled) {
-        // Set to neutral position when disabled
         state_.targetPosition = 0.0f;
     }
     updateState();
     return Config::Result<void>();
 }
 
+/**
+ * @brief Stops the motor immediately.
+ */
 void ServoMotorController::emergencyStop() {
     state_.enabled = false;
     state_.status = Config::ErrorCode::EMERGENCY_STOP;
-    // Set PWM to neutral
-    auto pwmResult = hwManager_->setPWMDutyCycle(timerId_, channel_, 1500); // 1.5ms pulse
+    hwManager_->setPWMDutyCycle(timerId_, channel_, 1500);
     updateState();
 }
 
+/**
+ * @brief Resets the motor's watchdog timer.
+ */
 void ServoMotorController::resetWatchdog() {
     lastWatchdogReset_ = HAL_GetTick();
     watchdogExpired_ = false;
 }
 
+/**
+ * @brief Runs a self-test on the motor.
+ * @return Result of the operation.
+ */
 Config::Result<void> ServoMotorController::runSelfTest() {
-    // Basic self-test: try to set PWM values
     auto testResult = hwManager_->setPWMDutyCycle(timerId_, channel_, 1500);
     if (!testResult) {
         return Config::ErrorCode::HARDWARE_ERROR;
@@ -138,34 +162,47 @@ Config::Result<void> ServoMotorController::runSelfTest() {
     return Config::Result<void>();
 }
 
+/**
+ * @brief Updates the configuration of the motor.
+ * @param config The new configuration.
+ * @return Result of the operation.
+ */
 Config::Result<void> ServoMotorController::updateConfig(const Config::ServoConfig& config) {
     config_ = config;
     return Config::Result<void>();
 }
 
+/**
+ * @brief Converts an angle in degrees to a PWM pulse width.
+ * @param degrees The angle in degrees.
+ * @return The PWM pulse width in microseconds.
+ */
 float ServoMotorController::degreesToPulseWidth(float degrees) {
     const auto* config = Config::ConfigAccessor::getServoConfig(id_);
     if (!config) {
         return config->pulse_neutral_us;
     }
-
-    // Map degrees to pulse width
-    float normalizedAngle = degrees / (config->max_angle - config->min_angle);
-    float pulseRange = config->pulse_max_us - config->pulse_min_us;
-    return config->pulse_min_us + (normalizedAngle + 0.5f) * pulseRange;
+    float normalizedAngle = (degrees - config->min_angle) / (config->max_angle - config->min_angle);
+    return config->pulse_min_us + normalizedAngle * (config->pulse_max_us - config->pulse_min_us);
 }
 
+/**
+ * @brief Converts a PWM pulse width to an angle in degrees.
+ * @param pulseWidth The PWM pulse width in microseconds.
+ * @return The angle in degrees.
+ */
 float ServoMotorController::pulseWidthToDegrees(float pulseWidth) {
     const auto* config = Config::ConfigAccessor::getServoConfig(id_);
     if (!config) {
         return 0.0f;
     }
-
-    float pulseRange = config->pulse_max_us - config->pulse_min_us;
-    float normalizedPulse = (pulseWidth - config->pulse_min_us) / pulseRange - 0.5f;
-    return normalizedPulse * (config->max_angle - config->min_angle);
+    float normalizedPulse = (pulseWidth - config->pulse_min_us) / (config->pulse_max_us - config->pulse_min_us);
+    return config->min_angle + normalizedPulse * (config->max_angle - config->min_angle);
 }
 
+/**
+ * @brief Checks the watchdog timer and stops the motor if it has expired.
+ */
 void ServoMotorController::checkWatchdog() {
     const auto* config = Config::ConfigAccessor::getServoConfig(id_);
     if (config && (HAL_GetTick() - lastWatchdogReset_) > config->watchdog_timeout_ms) {
@@ -177,6 +214,10 @@ void ServoMotorController::checkWatchdog() {
     }
 }
 
+/**
+ * @brief Reports an error.
+ * @param error The error to report.
+ */
 void ServoMotorController::reportError(MotorStatus error) {
     state_.errorCount++;
     if (errorCallback_) {
@@ -184,6 +225,9 @@ void ServoMotorController::reportError(MotorStatus error) {
     }
 }
 
+/**
+ * @brief Updates the state of the motor and invokes the state callback.
+ */
 void ServoMotorController::updateState() {
     state_.lastUpdateTime = HAL_GetTick();
     if (stateCallback_) {

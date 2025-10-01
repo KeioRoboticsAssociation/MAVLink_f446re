@@ -1,3 +1,8 @@
+/**
+ * @file motor_config.hpp
+ * @brief Defines the configuration for motors and system-wide parameters.
+ */
+
 #pragma once
 
 #include <cstdint>
@@ -6,7 +11,9 @@
 
 namespace Config {
 
-// Motor instances configuration - Maps device IDs to hardware resources
+/**
+ * @brief Defines a motor instance, mapping a device ID to hardware resources.
+ */
 struct MotorInstance {
     uint8_t id;
     enum class Type : uint8_t {
@@ -19,24 +26,21 @@ struct MotorInstance {
     bool enabled;
 };
 
-// Hardware resource mapping based on robot configuration
+/**
+ * @brief Configuration of all motor instances in the system.
+ */
 constexpr std::array<MotorInstance, 6> MOTOR_INSTANCES = {{
-    // Servos - use robot_config.hpp Hardware::SERVO_TIMERS mapping
     {1, MotorInstance::Type::SERVO, Hardware::SERVO_TIMERS[0].timer_id, Hardware::SERVO_TIMERS[0].channel, true},
     {2, MotorInstance::Type::SERVO, Hardware::SERVO_TIMERS[1].timer_id, Hardware::SERVO_TIMERS[1].channel, true},
     {3, MotorInstance::Type::SERVO, Hardware::SERVO_TIMERS[2].timer_id, Hardware::SERVO_TIMERS[2].channel, true},
     {4, MotorInstance::Type::SERVO, Hardware::SERVO_TIMERS[3].timer_id, Hardware::SERVO_TIMERS[3].channel, true},
-
-    // DC Motor - use robot_config.hpp Hardware::DC_MOTOR_TIMERS mapping
     {10, MotorInstance::Type::DC_MOTOR, Hardware::DC_MOTOR_TIMERS[0].timer_id, Hardware::DC_MOTOR_TIMERS[0].channel, true},
-
-    // RoboMaster - CAN-based (no timer/channel needed)
     {20, MotorInstance::Type::ROBOMASTER, 0, 0, true}
 }};
 
-// Legacy compatibility structures (for existing code that might still use them)
-// These now reference the new robot_config.hpp configurations
-
+/**
+ * @brief Legacy compatibility structure for servo configuration.
+ */
 struct ServoConfig {
     static constexpr float ANGLE_MIN = Devices::SERVO_CONFIGS[0].min_angle;
     static constexpr float ANGLE_MAX = Devices::SERVO_CONFIGS[0].max_angle;
@@ -52,6 +56,9 @@ struct ServoConfig {
     static constexpr bool START_DISABLED = Devices::SERVO_CONFIGS[0].start_disabled;
 };
 
+/**
+ * @brief Legacy compatibility structure for DC motor configuration.
+ */
 struct DCMotorConfig {
     static constexpr float SPEED_KP = Devices::DC_MOTOR_CONFIGS[0].speed_kp;
     static constexpr float SPEED_KI = Devices::DC_MOTOR_CONFIGS[0].speed_ki;
@@ -71,6 +78,9 @@ struct DCMotorConfig {
     static constexpr uint32_t CONTROL_PERIOD_MS = Devices::DC_MOTOR_CONFIGS[0].control_period_ms;
 };
 
+/**
+ * @brief Legacy compatibility structure for RoboMaster motor configuration.
+ */
 struct RoboMasterConfig {
     static constexpr float ANGLE_KP = Devices::ROBOMASTER_CONFIGS[0].angle_kp;
     static constexpr float ANGLE_KI = Devices::ROBOMASTER_CONFIGS[0].angle_ki;
@@ -83,11 +93,13 @@ struct RoboMasterConfig {
     static constexpr uint32_t WATCHDOG_TIMEOUT_MS = Devices::ROBOMASTER_CONFIGS[0].watchdog_timeout_ms;
 };
 
-// System-wide configuration - now references robot_config.hpp
+/**
+ * @brief System-wide configuration parameters.
+ */
 namespace System {
     static constexpr uint8_t MAVLINK_SYSTEM_ID = Robot::MAVLINK_SYSTEM_ID;
     static constexpr uint8_t MAVLINK_COMPONENT_ID = Robot::MAVLINK_COMPONENT_ID;
-    static constexpr uint32_t SYSTEM_CLOCK_HZ = 84000000; // STM32F446 specific
+    static constexpr uint32_t SYSTEM_CLOCK_HZ = 84000000;
     static constexpr uint32_t UART_BAUD_RATE = Robot::UART_BAUD_RATE;
     static constexpr uint8_t MAX_MOTORS = Robot::MAX_SERVOS + Robot::MAX_DC_MOTORS + Robot::MAX_ROBOMASTER_MOTORS;
     static constexpr uint8_t MAX_SERVOS = Robot::MAX_SERVOS;

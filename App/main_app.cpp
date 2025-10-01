@@ -1,61 +1,78 @@
+/**
+ * @file main_app.cpp
+ * @brief Main application entry points and system context initialization.
+ */
+
 #include "system_context.hpp"
 #include "config/motor_config.hpp"
 #include "motors/base/motor_factory.hpp"
 #include "comm/unified_mavlink_handler.hpp"
 
-// External C dependencies from STM32 HAL
 extern "C" {
     #include "main.h"
 
-    // HAL handles from main.c
     extern TIM_HandleTypeDef htim1, htim2, htim3, htim4;
     extern UART_HandleTypeDef huart2;
     extern CAN_HandleTypeDef hcan1;
 }
 
-// Global system context
+/**
+ * @brief Global system context instance.
+ */
 static System::SystemContext g_systemContext;
 
 extern "C" {
 
-// C-compatible entry points called from main.c
+/**
+ * @brief C-compatible setup function, called once at the beginning of the program.
+ *
+ * This function initializes the main system context, which in turn initializes all
+ * subsystems like hardware, communication, and motors. If initialization fails,
+ * it puts the system into an emergency stop state.
+ */
 void cpp_setup() {
-    // Initialize the system context
     auto result = g_systemContext.initialize();
     if (!result) {
-        // Handle initialization failure
         g_systemContext.reportError(result.error(), "System initialization failed");
-
-        // Fall back to emergency mode
         g_systemContext.setEmergencyStop(true);
         return;
     }
-
-    // System successfully initialized
 }
 
+/**
+ * @brief C-compatible main loop function, called repeatedly.
+ *
+ * This function is the heart of the application, responsible for updating all
+ * subsystems in each iteration of the main loop. It handles errors that may
+ * occur during the update process and continues to run while logging the error.
+ */
 void cpp_loop() {
-    // Update all subsystems
     auto result = g_systemContext.update();
     if (!result) {
-        // Handle update failure
         g_systemContext.reportError(result.error(), "System update failed");
-
-        // Continue running but log the error
         return;
     }
-
-    // Optional: Add small delay to prevent overwhelming the system
-    // HAL_Delay(1); // 1ms delay for 1000Hz loop
 }
 
+/**
+ * @brief C-compatible emergency stop function.
+ *
+ * This function is called to trigger an immediate emergency stop of the system.
+ * It sets the emergency stop flag in the system context, which will be handled
+ * by the relevant subsystems.
+ */
 void cpp_emergency_stop() {
-    // Emergency stop handler
     g_systemContext.setEmergencyStop(true);
 }
 
+/**
+ * @brief C-compatible shutdown function.
+ *
+ * This function is called to perform a graceful shutdown of the system.
+ * It calls the shutdown method of the system context to de-initialize all
+ * subsystems in an orderly manner.
+ */
 void cpp_shutdown() {
-    // Graceful shutdown
     g_systemContext.shutdown();
 }
 

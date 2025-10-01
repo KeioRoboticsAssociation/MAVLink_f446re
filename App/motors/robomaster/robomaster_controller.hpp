@@ -1,3 +1,8 @@
+/**
+ * @file robomaster_controller.hpp
+ * @brief Defines the controller for RoboMaster motors.
+ */
+
 #pragma once
 
 #include "../base/motor_interface.hpp"
@@ -11,6 +16,9 @@ extern "C" {
 namespace Motors {
 namespace RoboMaster {
 
+/**
+ * @brief A controller for RoboMaster motors.
+ */
 class RoboMasterMotorController : public IMotorController<Config::RoboMasterConfig> {
 private:
     uint8_t id_;
@@ -21,11 +29,9 @@ private:
     uint32_t lastWatchdogReset_;
     bool watchdogExpired_;
 
-    // CAN communication variables
     uint32_t canId_;
     uint32_t lastCanRx_;
 
-    // PID control variables for angle and speed
     float anglePidIntegral_;
     float anglePidLastError_;
     float speedPidIntegral_;
@@ -35,10 +41,14 @@ private:
     std::function<void(uint8_t, const MotorState&)> stateCallback_;
 
 public:
+    /**
+     * @brief Construct a new RoboMasterMotorController object.
+     * @param id The ID of the motor.
+     * @param hwManager A pointer to the hardware manager.
+     */
     RoboMasterMotorController(uint8_t id, HAL::HardwareManager* hwManager);
     ~RoboMasterMotorController() = default;
 
-    // IMotorController implementation
     Config::Result<void> initialize(const Config::RoboMasterConfig& config) override;
     Config::Result<void> update(float deltaTime) override;
     Config::Result<void> setCommand(const MotorCommand& cmd) override;
@@ -53,16 +63,23 @@ public:
     MotorStatus getStatus() const override { return state_.status; }
     Config::RoboMasterConfig getConfig() const override { return config_; }
 
-    void setErrorCallback(std::function<void(uint8_t, MotorStatus)> callback) override {
-        errorCallback_ = callback;
-    }
+    void setErrorCallback(std::function<void(uint8_t, MotorStatus)> callback) override;
+    void setStateCallback(std::function<void(uint8_t, const MotorState&)> callback) override;
 
-    void setStateCallback(std::function<void(uint8_t, const MotorState&)> callback) override {
-        stateCallback_ = callback;
-    }
-
-    // RoboMaster specific methods
+    /**
+     * @brief Processes a CAN message received from the motor.
+     * @param canId The CAN ID of the message.
+     * @param data A pointer to the message data.
+     * @param length The length of the message data.
+     * @return Result of the operation.
+     */
     Config::Result<void> processCanMessage(uint32_t canId, const uint8_t* data, uint8_t length);
+
+    /**
+     * @brief Sends a command to the motor over CAN.
+     * @param current The current to send to the motor.
+     * @return Result of the operation.
+     */
     Config::Result<void> sendCanCommand(int16_t current);
 
 private:
@@ -73,9 +90,7 @@ private:
     void updateState();
 
     template<typename T>
-    T constrainValue(T value, T min, T max) {
-        return (value < min) ? min : (value > max) ? max : value;
-    }
+    T constrainValue(T value, T min, T max);
 };
 
 } // namespace RoboMaster
